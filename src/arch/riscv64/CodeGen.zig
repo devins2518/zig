@@ -753,13 +753,22 @@ fn ensureProcessDeathCapacity(self: *Self, additional_count: usize) !void {
 }
 
 fn allocMem(self: *Self, inst: Air.Inst.Index, abi_size: u32, abi_align: u32) !u32 {
-    if (abi_align > self.stack_align)
-        self.stack_align = abi_align;
+    assert(abi_size > 0);
+    assert(abi_align > 0);
+
+    // In order to efficiently load and store stack items that fit
+    // into registers, we bump up the alignment to the next power of
+    // two.
+    const adjusted_align = if (abi_size > 8)
+        abi_align
+    else
+        std.math.ceilPowerOfTwoAssert(u32, abi_size);
+
     // TODO find a free slot instead of always appending
-    const offset = mem.alignForward(u32, self.next_stack_offset, abi_align);
-    self.next_stack_offset = offset + abi_size;
-    if (self.next_stack_offset > self.max_end_stack)
-        self.max_end_stack = self.next_stack_offset;
+    const offset = mem.alignForward(u32, self.next_stack_offset, adjusted_align) + abi_size;
+    self.next_stack_offset = offset;
+    self.max_end_stack = @max(self.max_end_stack, self.next_stack_offset);
+
     try self.stack.putNoClobber(self.gpa, offset, .{
         .inst = inst,
         .size = abi_size,
