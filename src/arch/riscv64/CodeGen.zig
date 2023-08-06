@@ -926,7 +926,7 @@ fn airSlice(self: *Self, inst: Air.Inst.Index) !void {
 /// Asserts that generating an instruction of that form is possible.
 fn binOpRegister(
     self: *Self,
-    tag: Air.Inst.Tag,
+    mir_tag: Mir.Inst.Tag,
     maybe_inst: ?Air.Inst.Index,
     lhs: MCValue,
     rhs: MCValue,
@@ -989,7 +989,7 @@ fn binOpRegister(
     if (!lhs_is_register) try self.genSetReg(lhs_ty, lhs_reg, lhs);
     if (!rhs_is_register) try self.genSetReg(rhs_ty, rhs_reg, rhs);
 
-    const mir_data: Mir.Inst.RType = switch (tag) {
+    const mir_data: Mir.Inst.RType = switch (mir_tag) {
         .add,
         .sub,
         => .{
@@ -1001,7 +1001,7 @@ fn binOpRegister(
     };
 
     // TODO: is there a better way to do this?
-    _ = try switch (tag) {
+    _ = try switch (mir_tag) {
         .add => self.addInst(.{ .add = mir_data }),
         .sub => self.addInst(.{ .sub = mir_data }),
         else => unreachable,
@@ -1024,7 +1024,7 @@ fn binOpRegister(
 /// functions.
 fn binOp(
     self: *Self,
-    tag: Air.Inst.Tag,
+    mir_tag: Mir.Inst.Tag,
     maybe_inst: ?Air.Inst.Index,
     lhs: MCValue,
     rhs: MCValue,
@@ -1032,7 +1032,7 @@ fn binOp(
     rhs_ty: Type,
 ) InnerError!MCValue {
     const mod = self.bin_file.options.module.?;
-    switch (tag) {
+    switch (mir_tag) {
         // Arithmetic operations on integers and floats
         .add,
         .sub,
@@ -1045,7 +1045,7 @@ fn binOp(
                     const int_info = lhs_ty.intInfo(mod);
                     if (int_info.bits <= 64) {
                         // TODO immediate operands
-                        return try self.binOpRegister(tag, maybe_inst, lhs, rhs, lhs_ty, rhs_ty);
+                        return try self.binOpRegister(mir_tag, maybe_inst, lhs, rhs, lhs_ty, rhs_ty);
                     } else {
                         return self.fail("TODO binary operations on int with bits > 64", .{});
                     }
@@ -1053,31 +1053,39 @@ fn binOp(
                 else => unreachable,
             }
         },
-        .ptr_add,
-        .ptr_sub,
-        => {
-            switch (lhs_ty.zigTypeTag(mod)) {
-                .Pointer => {
-                    const ptr_ty = lhs_ty;
-                    const elem_ty = switch (ptr_ty.ptrSize(mod)) {
-                        .One => ptr_ty.childType(mod).childType(mod), // ptr to array, so get array element type
-                        else => ptr_ty.childType(mod),
-                    };
-                    const elem_size = elem_ty.abiSize(mod);
+        else => unreachable,
+    }
+}
 
-                    if (elem_size == 1) {
-                        const base_tag: Air.Inst.Tag = switch (tag) {
-                            .ptr_add => .add,
-                            .ptr_sub => .sub,
-                            else => unreachable,
-                        };
+fn ptrArithmetic(
+    self: *Self,
+    tag: Air.Inst.Tag,
+    lhs: MCValue,
+    rhs: MCValue,
+    lhs_ty: Type,
+    rhs_ty: Type,
+    maybe_inst: ?Air.Inst.Index,
+) InnerError!MCValue {
+    const mod = self.bin_file.options.module.?;
+    switch (lhs_ty.zigTypeTag(mod)) {
+        .Pointer => {
+            const ptr_ty = lhs_ty;
+            const elem_ty = switch (ptr_ty.ptrSize(mod)) {
+                .One => ptr_ty.childType(mod).childType(mod), // ptr to array, so get array element type
+                else => ptr_ty.childType(mod),
+            };
+            const elem_size = elem_ty.abiSize(mod);
 
-                        return try self.binOpRegister(base_tag, maybe_inst, lhs, rhs, lhs_ty, rhs_ty);
-                    } else {
-                        return self.fail("TODO ptr_add with elem_size > 1", .{});
-                    }
-                },
-                else => unreachable,
+            if (elem_size == 1) {
+                const base_tag: Mir.Inst.Tag = switch (tag) {
+                    .ptr_add => .add,
+                    .ptr_sub => .sub,
+                    else => unreachable,
+                };
+
+                return try self.binOp(base_tag, maybe_inst, lhs, rhs, lhs_ty, rhs_ty);
+            } else {
+                return self.fail("TODO ptr_add with elem_size > 1", .{});
             }
         },
         else => unreachable,
@@ -1091,7 +1099,11 @@ fn airBinOp(self: *Self, inst: Air.Inst.Index, tag: Air.Inst.Tag) !void {
     const lhs_ty = self.typeOf(bin_op.lhs);
     const rhs_ty = self.typeOf(bin_op.rhs);
 
-    const result: MCValue = if (self.liveness.isUnused(inst)) .dead else try self.binOp(tag, inst, lhs, rhs, lhs_ty, rhs_ty);
+    const result: MCValue = if (self.liveness.isUnused(inst)) .dead else switch (tag) {
+        .add => try self.binOp(.add, inst, lhs, rhs, lhs_ty, rhs_ty),
+        .sub => try self.binOp(.sub, inst, lhs, rhs, lhs_ty, rhs_ty),
+        else => unreachable,
+    };
     return self.finishAir(inst, result, .{ bin_op.lhs, bin_op.rhs, .none });
 }
 
@@ -1103,7 +1115,7 @@ fn airPtrArithmetic(self: *Self, inst: Air.Inst.Index, tag: Air.Inst.Tag) !void 
     const lhs_ty = self.typeOf(bin_op.lhs);
     const rhs_ty = self.typeOf(bin_op.rhs);
 
-    const result: MCValue = if (self.liveness.isUnused(inst)) .dead else try self.binOp(tag, inst, lhs, rhs, lhs_ty, rhs_ty);
+    const result: MCValue = if (self.liveness.isUnused(inst)) .dead else try self.ptrArithmetic(tag, lhs, rhs, lhs_ty, rhs_ty, inst);
     return self.finishAir(inst, result, .{ bin_op.lhs, bin_op.rhs, .none });
 }
 
