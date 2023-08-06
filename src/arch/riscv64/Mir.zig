@@ -34,6 +34,7 @@ pub const Inst = union(Tag) {
     csrrs: IType,
     csrrc: IType,
     csrrwi: IType,
+    csrrsi: IType,
     csrrci: IType,
     dbg_prologue_end,
     dbg_epilogue_begin,
@@ -96,21 +97,39 @@ pub const Inst = union(Tag) {
     xori: IType,
 
     pub const Tag = enum(u16) {
+        /// Bitwise and
         @"and",
+        /// 64 bit addition
         add,
+        /// 32 bit addition
         addw,
+        /// 64 bit addition with immediate
         addi,
+        /// 32 bit addition with immediate
         addiw,
+        /// Bitwise and
         andi,
+        /// Add unsigned immediate to PC
         auipc,
+        /// Branch if equal
         beq,
+        /// Branch if greater than or equal
         bge,
+        /// Branch if less than
         blt,
+        /// Branch if not equal to
         bne,
+        /// Atomically read/write CSR
         csrrw,
+        /// Atomically read/set bits CSR
         csrrs,
+        /// Atomically read/clear bits CSR
         csrrc,
+        /// Atomically read/write CSR from immediate
         csrrwi,
+        /// Atomically read/set bits CSR from immediate
+        csrrsi,
+        /// Atomically read/clear bits CSR from immediate
         csrrci,
         /// Pseudo-instruction: End of prologue
         dbg_prologue_end,
@@ -118,61 +137,117 @@ pub const Inst = union(Tag) {
         dbg_epilogue_begin,
         /// Pseudo-instruction: Update debug line
         dbg_line,
+        /// 64-bit signed division
         div,
+        /// 32-bit signed division
         divw,
+        /// 64-bit unsigned division
         divu,
+        /// 32-bit unsigned division
         divuw,
+        /// Causes control to be handed back to debugger
         ebreak,
+        /// System call
         ecall,
+        /// Used to fence IO and memory transactions as viewed by other HARTs
         fence,
+        /// Used to fence instruction memory transactions as viewed by other HARTs
         fence_i,
+        /// Jump immediate and set return address in link register
         jal,
+        /// Jump register and set return address in link register
         jalr,
+        /// Load byte from memory
         lb,
+        /// Load unsigned byte from memory
         lbu,
-        lh,
-        lhu,
-        lui,
-        lw,
-        lwu,
+        /// Load double word from memory
         ld,
+        /// Load half word from memory
+        lh,
+        /// Load unsigned half word from memory
+        lhu,
+        /// Load upper immediate into register
+        lui,
+        /// Load word from memory
+        lw,
+        /// Load unsigned word from memory
+        lwu,
+        /// 64-bit multiplication setting lower 32-bits
         mul,
+        /// 32-bit multiplication
         mulw,
+        /// 64-bit signed-signed multiplication setting upper 32-bits
         mulh,
+        /// 64-bit signed-unsigned multiplication setting upper 32-bits
         mulhsu,
+        /// 64-bit unsigned-unsigned multiplication setting upper 32-bits
         mulhu,
+        /// Pseudo-instruction: Move register
         mv,
+        /// Pseudo-instruction: Noop
         nop,
+        /// Bitwise or
         @"or",
+        /// Bitwise or immediate
         ori,
+        /// 64-bit signed remainder
         rem,
+        /// 32-bit signed remainder
         remw,
+        /// 64-bit unsigned remainder
         remu,
+        /// 32-bit unsigned remainder
         remuw,
-        sd,
+        /// Store byte to memory
         sb,
+        /// Store double word to memory
+        sd,
+        /// Store half word to memory
         sh,
+        /// 64-bit shift left logical
         sll,
+        /// 32-bit shift left logical
         sllw,
+        /// 64-bit shift left logical by immediate
         slli,
+        /// 32-bit shift left logical by immediate
         slliw,
+        /// Set if less than
         slt,
+        /// 64-bit shift right arithmetic
         sra,
+        /// 32-bit shift right arithmetic
         sraw,
+        /// 64-bit shift right arithmetic by immediate
         srai,
+        /// 32-bit shift right arithmetic by immediate
         sraiw,
+        /// 64-bit shift right logical
         srl,
+        /// 32-bit shift right logical
         srlw,
+        /// 64-bit shift right logical by immediate
         srli,
+        /// 32-bit shift right logical by immediate
         srliw,
+        /// Set to immediate if less than
         slti,
+        /// Set to immediate if unsigned less than
         sltu,
+        /// 64-bit subtraction
         sub,
+        /// 32-bit subtraction
         subw,
+        /// Store word to memory
         sw,
+        /// Pseudo-instruction: return from function
         ret,
+        /// Pseudo-instruction: trigger illegal instruction exception
         unimp,
+        /// Bitwise exclusive or
         xor,
+        /// Bitwise exclusive or immediate
         xori,
     };
 
