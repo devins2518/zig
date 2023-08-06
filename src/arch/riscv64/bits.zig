@@ -223,6 +223,67 @@ pub const Instruction = union(enum) {
         return rType(0b0111011, 0b101, 0b0100000, rd, r1, r2);
     }
 
+    // Multiply/Divide
+
+    const muldiv_op: u7 = 0b0110011;
+    const muldiv_funct7: u7 = 0b0000001;
+
+    pub fn mul(rd: Register, r1: Register, r2: Register) Instruction {
+        return rType(muldiv_op, 0b000, muldiv_funct7, rd, r1, r2);
+    }
+
+    pub fn mulh(rd: Register, r1: Register, r2: Register) Instruction {
+        return rType(muldiv_op, 0b001, muldiv_funct7, rd, r1, r2);
+    }
+
+    pub fn mulhsu(rd: Register, r1: Register, r2: Register) Instruction {
+        return rType(muldiv_op, 0b010, muldiv_funct7, rd, r1, r2);
+    }
+
+    pub fn mulhu(rd: Register, r1: Register, r2: Register) Instruction {
+        return rType(muldiv_op, 0b011, muldiv_funct7, rd, r1, r2);
+    }
+
+    pub fn div(rd: Register, r1: Register, r2: Register) Instruction {
+        return rType(muldiv_op, 0b100, muldiv_funct7, rd, r1, r2);
+    }
+
+    pub fn divu(rd: Register, r1: Register, r2: Register) Instruction {
+        return rType(muldiv_op, 0b101, muldiv_funct7, rd, r1, r2);
+    }
+
+    pub fn rem(rd: Register, r1: Register, r2: Register) Instruction {
+        return rType(muldiv_op, 0b110, muldiv_funct7, rd, r1, r2);
+    }
+
+    pub fn remu(rd: Register, r1: Register, r2: Register) Instruction {
+        return rType(muldiv_op, 0b111, muldiv_funct7, rd, r1, r2);
+    }
+
+    // Multiply/Divide (32-bit)
+
+    const muldivw_op: u7 = 0b0111011;
+
+    pub fn mulw(rd: Register, r1: Register, r2: Register) Instruction {
+        return rType(muldivw_op, 0b000, muldiv_funct7, rd, r1, r2);
+    }
+
+    pub fn divw(rd: Register, r1: Register, r2: Register) Instruction {
+        return rType(muldivw_op, 0b100, muldiv_funct7, rd, r1, r2);
+    }
+
+    pub fn divuw(rd: Register, r1: Register, r2: Register) Instruction {
+        return rType(muldivw_op, 0b101, muldiv_funct7, rd, r1, r2);
+    }
+
+    pub fn remw(rd: Register, r1: Register, r2: Register) Instruction {
+        return rType(muldivw_op, 0b110, muldiv_funct7, rd, r1, r2);
+    }
+
+    pub fn remuw(rd: Register, r1: Register, r2: Register) Instruction {
+        return rType(muldivw_op, 0b111, muldiv_funct7, rd, r1, r2);
+    }
+
     // Arithmetic/Logical, Register-Immediate
 
     pub fn addi(rd: Register, r1: Register, imm: i12) Instruction {
