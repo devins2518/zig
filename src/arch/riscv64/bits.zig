@@ -204,7 +204,7 @@ pub const Instruction = union(enum) {
     // Arithmetic/Logical, Register-Register (32-bit)
 
     pub fn addw(rd: Register, r1: Register, r2: Register) Instruction {
-        return rType(0b0111011, 0b000, rd, r1, r2);
+        return rType(0b0111011, 0b000, 0b0000000, rd, r1, r2);
     }
 
     pub fn subw(rd: Register, r1: Register, r2: Register) Instruction {
@@ -241,16 +241,16 @@ pub const Instruction = union(enum) {
         return iType(0b0010011, 0b100, rd, r1, imm);
     }
 
-    pub fn slli(rd: Register, r1: Register, shamt: u6) Instruction {
-        return iType(0b0010011, 0b001, rd, r1, shamt);
+    pub fn slli(rd: Register, r1: Register, shamt: i12) Instruction {
+        return iType(0b0010011, 0b001, rd, r1, @as(i6, @truncate(shamt)));
     }
 
-    pub fn srli(rd: Register, r1: Register, shamt: u6) Instruction {
-        return iType(0b0010011, 0b101, rd, r1, shamt);
+    pub fn srli(rd: Register, r1: Register, shamt: i12) Instruction {
+        return iType(0b0010011, 0b101, rd, r1, @as(i6, @truncate(shamt)));
     }
 
-    pub fn srai(rd: Register, r1: Register, shamt: u6) Instruction {
-        return iType(0b0010011, 0b101, rd, r1, (1 << 10) + shamt);
+    pub fn srai(rd: Register, r1: Register, shamt: i12) Instruction {
+        return iType(0b0010011, 0b101, rd, r1, (1 << 10) + @as(i12, @as(i6, @truncate(shamt))));
     }
 
     pub fn slti(rd: Register, r1: Register, imm: i12) Instruction {
@@ -258,7 +258,7 @@ pub const Instruction = union(enum) {
     }
 
     pub fn sltiu(rd: Register, r1: Register, imm: u12) Instruction {
-        return iType(0b0010011, 0b011, rd, r1, @as(i12, @bitCast(imm)));
+        return iType(0b0010011, 0b011, rd, r1, imm);
     }
 
     // Arithmetic/Logical, Register-Immediate (32-bit)
@@ -267,16 +267,16 @@ pub const Instruction = union(enum) {
         return iType(0b0011011, 0b000, rd, r1, imm);
     }
 
-    pub fn slliw(rd: Register, r1: Register, shamt: u5) Instruction {
-        return iType(0b0011011, 0b001, rd, r1, shamt);
+    pub fn slliw(rd: Register, r1: Register, shamt: i12) Instruction {
+        return iType(0b0011011, 0b001, rd, r1, @as(i12, @as(i5, @truncate(shamt))));
     }
 
-    pub fn srliw(rd: Register, r1: Register, shamt: u5) Instruction {
-        return iType(0b0011011, 0b101, rd, r1, shamt);
+    pub fn srliw(rd: Register, r1: Register, shamt: i12) Instruction {
+        return iType(0b0011011, 0b101, rd, r1, @as(i12, @as(i5, @truncate(shamt))));
     }
 
-    pub fn sraiw(rd: Register, r1: Register, shamt: u5) Instruction {
-        return iType(0b0011011, 0b101, rd, r1, (1 << 10) + shamt);
+    pub fn sraiw(rd: Register, r1: Register, shamt: i12) Instruction {
+        return iType(0b0011011, 0b101, rd, r1, (1 << 10) + @as(i12, @as(i5, @truncate(shamt))));
     }
 
     // Upper Immediate
@@ -368,8 +368,8 @@ pub const Instruction = union(enum) {
 
     // Jump
 
-    pub fn jal(link: Register, offset: i21) Instruction {
-        return jType(0b1101111, link, offset);
+    pub fn jal(link: Register, offset: i20) Instruction {
+        return jType(0b1101111, link, @as(i21, offset) << 1);
     }
 
     pub fn jalr(link: Register, offset: i12, base: Register) Instruction {
@@ -378,6 +378,36 @@ pub const Instruction = union(enum) {
 
     // System
 
+    pub fn fence(pred_succ: i12) Instruction {
+        return iType(0b0001111, 0b000, .zero, .zero, pred_succ);
+    }
+
+    pub fn csrrw(rs1: Register, rd: Register, csr: i12) Instruction {
+        return iType(0b1110011, 0b001, rd, rs1, csr);
+    }
+
+    pub fn csrrs(rs1: Register, rd: Register, csr: i12) Instruction {
+        return iType(0b1110011, 0b010, rd, rs1, csr);
+    }
+
+    pub fn csrrc(rs1: Register, rd: Register, csr: i12) Instruction {
+        return iType(0b1110011, 0b011, rd, rs1, csr);
+    }
+
+    pub fn csrrwi(rs1: Register, rd: Register, csr: i12) Instruction {
+        return iType(0b1110011, 0b101, rd, rs1, csr);
+    }
+
+    pub fn csrrsi(rs1: Register, rd: Register, csr: i12) Instruction {
+        return iType(0b1110011, 0b110, rd, rs1, csr);
+    }
+
+    pub fn csrrci(rs1: Register, rd: Register, csr: i12) Instruction {
+        return iType(0b1110011, 0b111, rd, rs1, csr);
+    }
+
+    pub const fence_i = iType(0b0001111, 0b001, .zero, .zero, 0);
+    pub const ret = jalr(.ra, 0, .zero);
     pub const ecall = iType(0b1110011, 0b000, .zero, .zero, 0x000);
     pub const ebreak = iType(0b1110011, 0b000, .zero, .zero, 0x001);
     pub const unimp = iType(0, 0, .zero, .zero, 0);

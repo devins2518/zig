@@ -18,97 +18,193 @@ instructions: std.MultiArrayList(Inst).Slice,
 /// The meaning of this data is determined by `Inst.Tag` value.
 extra: []const u32,
 
-pub const Inst = struct {
-    tag: Tag,
-    /// The meaning of this depends on `tag`.
-    data: Data,
+pub const Inst = union(Tag) {
+    @"and": RType,
+    add: RType,
+    addw: RType,
+    addi: IType,
+    addiw: IType,
+    andi: IType,
+    auipc: UType,
+    beq: BType,
+    bge: BType,
+    blt: BType,
+    bne: BType,
+    csrrw: IType,
+    csrrs: IType,
+    csrrc: IType,
+    csrrwi: IType,
+    csrrci: IType,
+    dbg_prologue_end,
+    dbg_epilogue_begin,
+    dbg_line: DbgLineColumn,
+    ebreak,
+    ecall,
+    fence: IType, // TODO: wrong, custom format
+    fence_i: IType,
+    jal: JType,
+    jalr: IType,
+    lb: IType,
+    lbu: IType,
+    lh: IType,
+    lhu: IType,
+    lui: UType,
+    lw: IType,
+    lwu: IType,
+    ld: IType,
+    mv: IType,
+    nop,
+    @"or": RType,
+    ori: IType,
+    sd: SType,
+    sb: SType,
+    sh: SType,
+    sll: RType,
+    sllw: RType,
+    slli: IType,
+    slliw: IType,
+    slt: RType,
+    sra: RType,
+    sraw: RType,
+    srai: IType,
+    sraiw: IType,
+    srl: RType,
+    srlw: RType,
+    srli: IType,
+    srliw: IType,
+    slti: IType,
+    sltu: RType,
+    sub: RType,
+    subw: RType,
+    sw: SType,
+    ret,
+    unimp,
+    xor: RType,
+    xori: IType,
 
     pub const Tag = enum(u16) {
+        @"and",
         add,
+        addw,
         addi,
+        addiw,
+        andi,
+        auipc,
+        beq,
+        bge,
+        blt,
+        bne,
+        csrrw,
+        csrrs,
+        csrrc,
+        csrrwi,
+        csrrci,
         /// Pseudo-instruction: End of prologue
         dbg_prologue_end,
         /// Pseudo-instruction: Beginning of epilogue
         dbg_epilogue_begin,
         /// Pseudo-instruction: Update debug line
         dbg_line,
-        unimp,
         ebreak,
         ecall,
+        fence,
+        fence_i,
+        jal,
         jalr,
-        ld,
+        lb,
+        lbu,
+        lh,
+        lhu,
         lui,
+        lw,
+        lwu,
+        ld,
         mv,
         nop,
-        ret,
+        @"or",
+        ori,
         sd,
+        sb,
+        sh,
+        sll,
+        sllw,
+        slli,
+        slliw,
+        slt,
+        sra,
+        sraw,
+        srai,
+        sraiw,
+        srl,
+        srlw,
+        srli,
+        srliw,
+        slti,
+        sltu,
         sub,
+        subw,
+        sw,
+        ret,
+        unimp,
+        xor,
+        xori,
     };
 
     /// The position of an MIR instruction within the `Mir` instructions array.
     pub const Index = u32;
 
-    /// All instructions have a 4-byte payload, which is contained within
-    /// this union. `Tag` determines which union field is active, as well as
-    /// how to interpret the data within.
-    pub const Data = union {
-        /// No additional data
-        ///
-        /// Used by e.g. ebreak
-        nop: void,
-        /// Another instruction.
-        ///
-        /// Used by e.g. b
-        inst: Index,
-        /// A 16-bit immediate value.
-        ///
-        /// Used by e.g. svc
-        imm16: u16,
-        /// Index into `extra`. Meaning of what can be found there is context-dependent.
-        ///
-        /// Used by e.g. load_memory
-        payload: u32,
-        /// A register
-        ///
-        /// Used by e.g. blr
-        reg: Register,
-        /// Two registers
-        ///
-        /// Used by e.g. mv
-        rr: struct {
-            rd: Register,
-            rs: Register,
-        },
-        /// I-Type
-        ///
-        /// Used by e.g. jalr
-        i_type: struct {
-            rd: Register,
-            rs1: Register,
-            imm12: i12,
-        },
-        /// R-Type
-        ///
-        /// Used by e.g. add
-        r_type: struct {
-            rd: Register,
-            rs1: Register,
-            rs2: Register,
-        },
-        /// U-Type
-        ///
-        /// Used by e.g. lui
-        u_type: struct {
-            rd: Register,
-            imm20: i20,
-        },
-        /// Debug info: line and column
-        ///
-        /// Used by e.g. dbg_line
-        dbg_line_column: struct {
-            line: u32,
-            column: u32,
-        },
+    /// I-Type
+    ///
+    /// Used by e.g. jalr
+    pub const IType = struct {
+        rd: Register,
+        rs1: Register,
+        imm12: i12,
+    };
+    /// R-Type
+    ///
+    /// Used by e.g. add
+    pub const RType = struct {
+        rd: Register,
+        rs1: Register,
+        rs2: Register,
+    };
+    /// U-Type
+    ///
+    /// Used by e.g. lui
+    pub const UType = struct {
+        rd: Register,
+        imm20: i20,
+    };
+    /// J-Type
+    ///
+    /// Used by e.g. jal
+    pub const JType = struct {
+        rd: Register,
+        imm20: i20,
+    };
+    /// S-Type
+    ///
+    /// Used by e.g. sw
+    pub const SType = struct {
+        rs1: Register,
+        rs2: Register,
+        imm12: i12,
+    };
+    /// B-Type
+    ///
+    /// Used by e.g. beq
+    pub const BType = struct {
+        rs1: Register,
+        rs2: Register,
+        imm: i12,
+    };
+    /// Debug info: line and column
+    ///
+    /// Used by e.g. dbg_line
+    pub const DbgLineColumn = struct {
+        line: u32,
+        column: u32,
     };
 
     // Make sure we don't accidentally make instructions bigger than expected.

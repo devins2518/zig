@@ -35,35 +35,75 @@ const InnerError = error{
 pub fn emitMir(
     emit: *Emit,
 ) InnerError!void {
-    const mir_tags = emit.mir.instructions.items(.tag);
+    const mir_tags = emit.mir.instructions.items(.tags);
 
     // Emit machine code
     for (mir_tags, 0..) |tag, index| {
         const inst = @as(u32, @intCast(index));
         switch (tag) {
-            .add => try emit.mirRType(inst),
-            .sub => try emit.mirRType(inst),
+            .@"and",
+            .add,
+            .addw,
+            .nop,
+            .@"or",
+            .sll,
+            .sllw,
+            .slt,
+            .sra,
+            .sraw,
+            .srl,
+            .srlw,
+            .sltu,
+            .sub,
+            .subw,
+            .xor,
+            => try emit.mirRType(inst),
 
-            .addi => try emit.mirIType(inst),
-            .jalr => try emit.mirIType(inst),
-            .ld => try emit.mirIType(inst),
-            .sd => try emit.mirIType(inst),
+            .addi,
+            .addiw,
+            .andi,
+            .csrrw,
+            .csrrs,
+            .csrrc,
+            .csrrwi,
+            .csrrci,
+            .fence,
+            .fence_i,
+            .jalr,
+            .lb,
+            .lbu,
+            .lh,
+            .lhu,
+            .lw,
+            .lwu,
+            .ld,
+            .mv,
+            .ori,
+            .slli,
+            .slliw,
+            .srai,
+            .sraiw,
+            .srli,
+            .srliw,
+            .slti,
+            .ret,
+            .xori,
+            => try emit.mirIType(inst),
 
-            .ebreak => try emit.mirSystem(inst),
-            .ecall => try emit.mirSystem(inst),
-            .unimp => try emit.mirSystem(inst),
+            .sd, .sb, .sh, .sw => try emit.mirSType(inst),
+
+            .beq, .bge, .blt, .bne => try emit.mirBType(inst),
+
+            .jal => try emit.mirJType(inst),
+
+            .ebreak, .ecall, .unimp => try emit.mirSystem(inst),
 
             .dbg_line => try emit.mirDbgLine(inst),
 
             .dbg_prologue_end => try emit.mirDebugPrologueEnd(),
             .dbg_epilogue_begin => try emit.mirDebugEpilogueBegin(),
 
-            .mv => try emit.mirRR(inst),
-
-            .nop => try emit.mirNop(inst),
-            .ret => try emit.mirNop(inst),
-
-            .lui => try emit.mirUType(inst),
+            .auipc, .lui => try emit.mirUType(inst),
         }
     }
 }
@@ -125,31 +165,101 @@ fn dbgAdvancePCAndLine(self: *Emit, line: u32, column: u32) !void {
 }
 
 fn mirRType(emit: *Emit, inst: Mir.Inst.Index) !void {
-    const tag = emit.mir.instructions.items(.tag)[inst];
-    const r_type = emit.mir.instructions.items(.data)[inst].r_type;
+    const instruction = emit.mir.instructions.get(inst);
 
-    switch (tag) {
-        .add => try emit.writeInstruction(Instruction.add(r_type.rd, r_type.rs1, r_type.rs2)),
-        .sub => try emit.writeInstruction(Instruction.sub(r_type.rd, r_type.rs1, r_type.rs2)),
+    switch (instruction) {
+        .@"and" => |r_type| try emit.writeInstruction(Instruction.@"and"(r_type.rd, r_type.rs1, r_type.rs2)),
+        .add => |r_type| try emit.writeInstruction(Instruction.add(r_type.rd, r_type.rs1, r_type.rs2)),
+        .addw => |r_type| try emit.writeInstruction(Instruction.addw(r_type.rd, r_type.rs1, r_type.rs2)),
+        .nop => try emit.writeInstruction(Instruction.addi(.zero, .zero, 0)),
+        .@"or" => |r_type| try emit.writeInstruction(Instruction.@"or"(r_type.rd, r_type.rs1, r_type.rs2)),
+        .sll => |r_type| try emit.writeInstruction(Instruction.sll(r_type.rd, r_type.rs1, r_type.rs2)),
+        .sllw => |r_type| try emit.writeInstruction(Instruction.sllw(r_type.rd, r_type.rs1, r_type.rs2)),
+        .slt => |r_type| try emit.writeInstruction(Instruction.slt(r_type.rd, r_type.rs1, r_type.rs2)),
+        .sra => |r_type| try emit.writeInstruction(Instruction.sra(r_type.rd, r_type.rs1, r_type.rs2)),
+        .sraw => |r_type| try emit.writeInstruction(Instruction.sraw(r_type.rd, r_type.rs1, r_type.rs2)),
+        .srl => |r_type| try emit.writeInstruction(Instruction.srl(r_type.rd, r_type.rs1, r_type.rs2)),
+        .srlw => |r_type| try emit.writeInstruction(Instruction.srlw(r_type.rd, r_type.rs1, r_type.rs2)),
+        .sltu => |r_type| try emit.writeInstruction(Instruction.sltu(r_type.rd, r_type.rs1, r_type.rs2)),
+        .sub => |r_type| try emit.writeInstruction(Instruction.sub(r_type.rd, r_type.rs1, r_type.rs2)),
+        .subw => |r_type| try emit.writeInstruction(Instruction.subw(r_type.rd, r_type.rs1, r_type.rs2)),
+        .xor => |r_type| try emit.writeInstruction(Instruction.xor(r_type.rd, r_type.rs1, r_type.rs2)),
         else => unreachable,
     }
 }
 
 fn mirIType(emit: *Emit, inst: Mir.Inst.Index) !void {
-    const tag = emit.mir.instructions.items(.tag)[inst];
-    const i_type = emit.mir.instructions.items(.data)[inst].i_type;
+    const instruction = emit.mir.instructions.get(inst);
 
-    switch (tag) {
-        .addi => try emit.writeInstruction(Instruction.addi(i_type.rd, i_type.rs1, i_type.imm12)),
-        .jalr => try emit.writeInstruction(Instruction.jalr(i_type.rd, i_type.imm12, i_type.rs1)),
-        .ld => try emit.writeInstruction(Instruction.ld(i_type.rd, i_type.imm12, i_type.rs1)),
-        .sd => try emit.writeInstruction(Instruction.sd(i_type.rd, i_type.imm12, i_type.rs1)),
+    switch (instruction) {
+        .addi => |i_type| try emit.writeInstruction(Instruction.addi(i_type.rd, i_type.rs1, i_type.imm12)),
+        .addiw => |i_type| try emit.writeInstruction(Instruction.addiw(i_type.rd, i_type.rs1, i_type.imm12)),
+        .andi => |i_type| try emit.writeInstruction(Instruction.andi(i_type.rd, i_type.rs1, i_type.imm12)),
+        .csrrw => |i_type| try emit.writeInstruction(Instruction.csrrw(i_type.rd, i_type.rs1, i_type.imm12)),
+        .csrrs => |i_type| try emit.writeInstruction(Instruction.csrrs(i_type.rd, i_type.rs1, i_type.imm12)),
+        .csrrc => |i_type| try emit.writeInstruction(Instruction.csrrc(i_type.rd, i_type.rs1, i_type.imm12)),
+        .csrrwi => |i_type| try emit.writeInstruction(Instruction.csrrwi(i_type.rd, i_type.rs1, i_type.imm12)),
+        .csrrci => |i_type| try emit.writeInstruction(Instruction.csrrci(i_type.rd, i_type.rs1, i_type.imm12)),
+        .fence => |i_type| try emit.writeInstruction(Instruction.fence(i_type.imm12)),
+        .fence_i => try emit.writeInstruction(Instruction.fence_i),
+        .jalr => |i_type| try emit.writeInstruction(Instruction.jalr(i_type.rd, i_type.imm12, i_type.rs1)),
+        .lb => |i_type| try emit.writeInstruction(Instruction.lb(i_type.rd, i_type.imm12, i_type.rs1)),
+        .lbu => |i_type| try emit.writeInstruction(Instruction.lbu(i_type.rd, i_type.imm12, i_type.rs1)),
+        .lh => |i_type| try emit.writeInstruction(Instruction.lh(i_type.rd, i_type.imm12, i_type.rs1)),
+        .lhu => |i_type| try emit.writeInstruction(Instruction.lhu(i_type.rd, i_type.imm12, i_type.rs1)),
+        .lw => |i_type| try emit.writeInstruction(Instruction.lw(i_type.rd, i_type.imm12, i_type.rs1)),
+        .lwu => |i_type| try emit.writeInstruction(Instruction.lwu(i_type.rd, i_type.imm12, i_type.rs1)),
+        .ld => |i_type| try emit.writeInstruction(Instruction.ld(i_type.rd, i_type.imm12, i_type.rs1)),
+        .mv => |i_type| try emit.writeInstruction(Instruction.addi(i_type.rd, i_type.rs1, 0)),
+        .ori => |i_type| try emit.writeInstruction(Instruction.ori(i_type.rd, i_type.rs1, i_type.imm12)),
+        .slli => |i_type| try emit.writeInstruction(Instruction.slli(i_type.rd, i_type.rs1, i_type.imm12)),
+        .slliw => |i_type| try emit.writeInstruction(Instruction.slliw(i_type.rd, i_type.rs1, i_type.imm12)),
+        .srai => |i_type| try emit.writeInstruction(Instruction.srai(i_type.rd, i_type.rs1, i_type.imm12)),
+        .sraiw => |i_type| try emit.writeInstruction(Instruction.sraiw(i_type.rd, i_type.rs1, i_type.imm12)),
+        .srli => |i_type| try emit.writeInstruction(Instruction.srli(i_type.rd, i_type.rs1, i_type.imm12)),
+        .srliw => |i_type| try emit.writeInstruction(Instruction.srliw(i_type.rd, i_type.rs1, i_type.imm12)),
+        .slti => |i_type| try emit.writeInstruction(Instruction.slti(i_type.rd, i_type.rs1, i_type.imm12)),
+        .ret => try emit.writeInstruction(Instruction.ret),
+        .xori => |i_type| try emit.writeInstruction(Instruction.xori(i_type.rd, i_type.rs1, i_type.imm12)),
+        else => unreachable,
+    }
+}
+
+fn mirSType(emit: *Emit, inst: Mir.Inst.Index) !void {
+    const instruction = emit.mir.instructions.get(inst);
+
+    switch (instruction) {
+        .sd => |s_type| try emit.writeInstruction(Instruction.sd(s_type.rs2, s_type.imm12, s_type.rs1)),
+        .sb => |s_type| try emit.writeInstruction(Instruction.sb(s_type.rs2, s_type.imm12, s_type.rs1)),
+        .sh => |s_type| try emit.writeInstruction(Instruction.sh(s_type.rs2, s_type.imm12, s_type.rs1)),
+        .sw => |s_type| try emit.writeInstruction(Instruction.sw(s_type.rs2, s_type.imm12, s_type.rs1)),
+        else => unreachable,
+    }
+}
+
+fn mirBType(emit: *Emit, inst: Mir.Inst.Index) !void {
+    const instruction = emit.mir.instructions.get(inst);
+
+    switch (instruction) {
+        .beq => |b_type| try emit.writeInstruction(Instruction.beq(b_type.rs1, b_type.rs2, b_type.imm)),
+        .bge => |b_type| try emit.writeInstruction(Instruction.bge(b_type.rs1, b_type.rs2, b_type.imm)),
+        .blt => |b_type| try emit.writeInstruction(Instruction.blt(b_type.rs1, b_type.rs2, b_type.imm)),
+        .bne => |b_type| try emit.writeInstruction(Instruction.bne(b_type.rs1, b_type.rs2, b_type.imm)),
+        else => unreachable,
+    }
+}
+
+fn mirJType(emit: *Emit, inst: Mir.Inst.Index) !void {
+    const instruction = emit.mir.instructions.get(inst);
+
+    switch (instruction) {
+        .jal => |j_type| try emit.writeInstruction(Instruction.jal(j_type.rd, j_type.imm20)),
         else => unreachable,
     }
 }
 
 fn mirSystem(emit: *Emit, inst: Mir.Inst.Index) !void {
-    const tag = emit.mir.instructions.items(.tag)[inst];
+    const tag = emit.mir.instructions.items(.tags)[inst];
 
     switch (tag) {
         .ebreak => try emit.writeInstruction(Instruction.ebreak),
@@ -160,11 +270,10 @@ fn mirSystem(emit: *Emit, inst: Mir.Inst.Index) !void {
 }
 
 fn mirDbgLine(emit: *Emit, inst: Mir.Inst.Index) !void {
-    const tag = emit.mir.instructions.items(.tag)[inst];
-    const dbg_line_column = emit.mir.instructions.items(.data)[inst].dbg_line_column;
+    const dbg_line = emit.mir.instructions.get(inst);
 
-    switch (tag) {
-        .dbg_line => try emit.dbgAdvancePCAndLine(dbg_line_column.line, dbg_line_column.column),
+    switch (dbg_line) {
+        .dbg_line => |dbg_line_column| try emit.dbgAdvancePCAndLine(dbg_line_column.line, dbg_line_column.column),
         else => unreachable,
     }
 }
@@ -191,31 +300,12 @@ fn mirDebugEpilogueBegin(self: *Emit) !void {
     }
 }
 
-fn mirRR(emit: *Emit, inst: Mir.Inst.Index) !void {
-    const tag = emit.mir.instructions.items(.tag)[inst];
-    const rr = emit.mir.instructions.items(.data)[inst].rr;
-
-    switch (tag) {
-        .mv => try emit.writeInstruction(Instruction.addi(rr.rd, rr.rs, 0)),
-        else => unreachable,
-    }
-}
 fn mirUType(emit: *Emit, inst: Mir.Inst.Index) !void {
-    const tag = emit.mir.instructions.items(.tag)[inst];
-    const u_type = emit.mir.instructions.items(.data)[inst].u_type;
+    const instruction = emit.mir.instructions.get(inst);
 
-    switch (tag) {
-        .lui => try emit.writeInstruction(Instruction.lui(u_type.rd, u_type.imm20)),
-        else => unreachable,
-    }
-}
-
-fn mirNop(emit: *Emit, inst: Mir.Inst.Index) !void {
-    const tag = emit.mir.instructions.items(.tag)[inst];
-
-    switch (tag) {
-        .nop => try emit.writeInstruction(Instruction.addi(.zero, .zero, 0)),
-        .ret => try emit.writeInstruction(Instruction.jalr(.zero, 0, .ra)),
+    switch (instruction) {
+        .auipc => |u_type| try emit.writeInstruction(Instruction.auipc(u_type.rd, u_type.imm20)),
+        .lui => |u_type| try emit.writeInstruction(Instruction.lui(u_type.rd, u_type.imm20)),
         else => unreachable,
     }
 }

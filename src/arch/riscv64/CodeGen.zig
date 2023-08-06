@@ -356,46 +356,31 @@ fn gen(self: *Self) !void {
 
         // TODO Backpatch stack offset
         // addi sp, sp, -16
-        _ = try self.addInst(.{
-            .tag = .addi,
-            .data = .{ .i_type = .{
-                .rd = .sp,
-                .rs1 = .sp,
-                .imm12 = -16,
-            } },
-        });
+        _ = try self.addInst(.{ .addi = .{
+            .rd = .sp,
+            .rs1 = .sp,
+            .imm12 = -16,
+        } });
 
         // sd ra, 8(sp)
-        _ = try self.addInst(.{
-            .tag = .sd,
-            .data = .{ .i_type = .{
-                .rd = .ra,
-                .rs1 = .sp,
-                .imm12 = 8,
-            } },
-        });
+        _ = try self.addInst(.{ .sd = .{
+            .rs2 = .ra,
+            .rs1 = .sp,
+            .imm12 = 8,
+        } });
 
         // sd s0, 0(sp)
-        _ = try self.addInst(.{
-            .tag = .sd,
-            .data = .{ .i_type = .{
-                .rd = .s0,
-                .rs1 = .sp,
-                .imm12 = 0,
-            } },
-        });
+        _ = try self.addInst(.{ .sd = .{
+            .rs2 = .s0,
+            .rs1 = .sp,
+            .imm12 = 0,
+        } });
 
-        _ = try self.addInst(.{
-            .tag = .dbg_prologue_end,
-            .data = .{ .nop = {} },
-        });
+        _ = try self.addInst(.{ .dbg_prologue_end = {} });
 
         try self.genBody(self.air.getMainBody());
 
-        _ = try self.addInst(.{
-            .tag = .dbg_epilogue_begin,
-            .data = .{ .nop = {} },
-        });
+        _ = try self.addInst(.{ .dbg_epilogue_begin = {} });
 
         // exitlude jumps
         if (self.exitlude_jump_relocs.items.len > 0 and
@@ -414,62 +399,41 @@ fn gen(self: *Self) !void {
         }
 
         // ld ra, 8(sp)
-        _ = try self.addInst(.{
-            .tag = .ld,
-            .data = .{ .i_type = .{
-                .rd = .ra,
-                .rs1 = .sp,
-                .imm12 = 8,
-            } },
-        });
+        _ = try self.addInst(.{ .ld = .{
+            .rd = .ra,
+            .rs1 = .sp,
+            .imm12 = 8,
+        } });
 
         // ld s0, 0(sp)
-        _ = try self.addInst(.{
-            .tag = .ld,
-            .data = .{ .i_type = .{
-                .rd = .s0,
-                .rs1 = .sp,
-                .imm12 = 0,
-            } },
-        });
+        _ = try self.addInst(.{ .ld = .{
+            .rd = .s0,
+            .rs1 = .sp,
+            .imm12 = 0,
+        } });
 
         // addi sp, sp, 16
-        _ = try self.addInst(.{
-            .tag = .addi,
-            .data = .{ .i_type = .{
-                .rd = .sp,
-                .rs1 = .sp,
-                .imm12 = 16,
-            } },
-        });
+        _ = try self.addInst(.{ .addi = .{
+            .rd = .sp,
+            .rs1 = .sp,
+            .imm12 = 16,
+        } });
 
         // ret
-        _ = try self.addInst(.{
-            .tag = .ret,
-            .data = .{ .nop = {} },
-        });
+        _ = try self.addInst(.{ .ret = {} });
     } else {
-        _ = try self.addInst(.{
-            .tag = .dbg_prologue_end,
-            .data = .{ .nop = {} },
-        });
+        _ = try self.addInst(.{ .dbg_prologue_end = {} });
 
         try self.genBody(self.air.getMainBody());
 
-        _ = try self.addInst(.{
-            .tag = .dbg_epilogue_begin,
-            .data = .{ .nop = {} },
-        });
+        _ = try self.addInst(.{ .dbg_epilogue_begin = {} });
     }
 
     // Drop them off at the rbrace.
-    _ = try self.addInst(.{
-        .tag = .dbg_line,
-        .data = .{ .dbg_line_column = .{
-            .line = self.end_di_line,
-            .column = self.end_di_column,
-        } },
-    });
+    _ = try self.addInst(.{ .dbg_line = .{
+        .line = self.end_di_line,
+        .column = self.end_di_column,
+    } });
 }
 
 fn genBody(self: *Self, body: []const Air.Inst.Index) InnerError!void {
@@ -1025,26 +989,23 @@ fn binOpRegister(
     if (!lhs_is_register) try self.genSetReg(lhs_ty, lhs_reg, lhs);
     if (!rhs_is_register) try self.genSetReg(rhs_ty, rhs_reg, rhs);
 
-    const mir_tag: Mir.Inst.Tag = switch (tag) {
-        .add => .add,
-        .sub => .sub,
-        else => unreachable,
-    };
-    const mir_data: Mir.Inst.Data = switch (tag) {
+    const mir_data: Mir.Inst.RType = switch (tag) {
         .add,
         .sub,
-        => .{ .r_type = .{
+        => .{
             .rd = dest_reg,
             .rs1 = lhs_reg,
             .rs2 = rhs_reg,
-        } },
+        },
         else => unreachable,
     };
 
-    _ = try self.addInst(.{
-        .tag = mir_tag,
-        .data = mir_data,
-    });
+    // TODO: is there a better way to do this?
+    _ = try switch (tag) {
+        .add => self.addInst(.{ .add = mir_data }),
+        .sub => self.addInst(.{ .sub = mir_data }),
+        else => unreachable,
+    };
 
     return MCValue{ .register = dest_reg };
 }
@@ -1674,18 +1635,12 @@ fn airArg(self: *Self, inst: Air.Inst.Index) !void {
 }
 
 fn airTrap(self: *Self) !void {
-    _ = try self.addInst(.{
-        .tag = .unimp,
-        .data = .{ .nop = {} },
-    });
+    _ = try self.addInst(.{ .unimp = {} });
     return self.finishAirBookkeeping();
 }
 
 fn airBreakpoint(self: *Self) !void {
-    _ = try self.addInst(.{
-        .tag = .ebreak,
-        .data = .{ .nop = {} },
-    });
+    _ = try self.addInst(.{ .ebreak = {} });
     return self.finishAirBookkeeping();
 }
 
@@ -1752,14 +1707,11 @@ fn airCall(self: *Self, inst: Air.Inst.Index, modifier: std.builtin.CallModifier
                     _ = try atom.getOrCreateOffsetTableEntry(elf_file);
                     const got_addr = @as(u32, @intCast(atom.getOffsetTableAddress(elf_file)));
                     try self.genSetReg(Type.usize, .ra, .{ .memory = got_addr });
-                    _ = try self.addInst(.{
-                        .tag = .jalr,
-                        .data = .{ .i_type = .{
-                            .rd = .ra,
-                            .rs1 = .ra,
-                            .imm12 = 0,
-                        } },
-                    });
+                    _ = try self.addInst(.{ .jalr = .{
+                        .rd = .ra,
+                        .rs1 = .ra,
+                        .imm12 = 0,
+                    } });
                 },
                 .extern_func => {
                     return self.fail("TODO implement calling extern functions", .{});
@@ -1811,10 +1763,7 @@ fn ret(self: *Self, mcv: MCValue) !void {
     const ret_ty = self.fn_type.fnReturnType(mod);
     try self.setRegOrMem(ret_ty, self.ret_mcv, mcv);
     // Just add space for an instruction, patch this later
-    const index = try self.addInst(.{
-        .tag = .nop,
-        .data = .{ .nop = {} },
-    });
+    const index = try self.addInst(.{ .nop = {} });
     try self.exitlude_jump_relocs.append(self.gpa, index);
 }
 
@@ -1869,13 +1818,10 @@ fn airCmpLtErrorsLen(self: *Self, inst: Air.Inst.Index) !void {
 fn airDbgStmt(self: *Self, inst: Air.Inst.Index) !void {
     const dbg_stmt = self.air.instructions.items(.data)[inst].dbg_stmt;
 
-    _ = try self.addInst(.{
-        .tag = .dbg_line,
-        .data = .{ .dbg_line_column = .{
-            .line = dbg_stmt.line,
-            .column = dbg_stmt.column,
-        } },
-    });
+    _ = try self.addInst(.{ .dbg_line = .{
+        .line = dbg_stmt.line,
+        .column = dbg_stmt.column,
+    } });
 
     return self.finishAirBookkeeping();
 }
@@ -2208,10 +2154,7 @@ fn airAsm(self: *Self, inst: Air.Inst.Index) !void {
         const asm_source = std.mem.sliceAsBytes(self.air.extra[extra_i..])[0..extra.data.source_len];
 
         if (mem.eql(u8, asm_source, "ecall")) {
-            _ = try self.addInst(.{
-                .tag = .ecall,
-                .data = .{ .nop = {} },
-            });
+            _ = try self.addInst(.{ .ecall = {} });
         } else {
             return self.fail("TODO implement support for more riscv64 assembly instructions", .{});
         }
@@ -2297,35 +2240,26 @@ fn genSetReg(self: *Self, ty: Type, reg: Register, mcv: MCValue) InnerError!void
         .immediate => |unsigned_x| {
             const x = @as(i64, @bitCast(unsigned_x));
             if (math.minInt(i12) <= x and x <= math.maxInt(i12)) {
-                _ = try self.addInst(.{
-                    .tag = .addi,
-                    .data = .{ .i_type = .{
-                        .rd = reg,
-                        .rs1 = .zero,
-                        .imm12 = @as(i12, @intCast(x)),
-                    } },
-                });
+                _ = try self.addInst(.{ .addi = .{
+                    .rd = reg,
+                    .rs1 = .zero,
+                    .imm12 = @as(i12, @intCast(x)),
+                } });
             } else if (math.minInt(i32) <= x and x <= math.maxInt(i32)) {
                 const lo12 = @as(i12, @truncate(x));
                 const carry: i32 = if (lo12 < 0) 1 else 0;
                 const hi20 = @as(i20, @truncate((x >> 12) +% carry));
 
                 // TODO: add test case for 32-bit immediate
-                _ = try self.addInst(.{
-                    .tag = .lui,
-                    .data = .{ .u_type = .{
-                        .rd = reg,
-                        .imm20 = hi20,
-                    } },
-                });
-                _ = try self.addInst(.{
-                    .tag = .addi,
-                    .data = .{ .i_type = .{
-                        .rd = reg,
-                        .rs1 = reg,
-                        .imm12 = lo12,
-                    } },
-                });
+                _ = try self.addInst(.{ .lui = .{
+                    .rd = reg,
+                    .imm20 = hi20,
+                } });
+                _ = try self.addInst(.{ .addi = .{
+                    .rd = reg,
+                    .rs1 = reg,
+                    .imm12 = lo12,
+                } });
             } else {
                 // li rd, immediate
                 // "Myriad sequences"
@@ -2338,27 +2272,22 @@ fn genSetReg(self: *Self, ty: Type, reg: Register, mcv: MCValue) InnerError!void
                 return;
 
             // mov reg, src_reg
-            _ = try self.addInst(.{
-                .tag = .mv,
-                .data = .{ .rr = .{
-                    .rd = reg,
-                    .rs = src_reg,
-                } },
-            });
+            _ = try self.addInst(.{ .mv = .{
+                .rd = reg,
+                .rs1 = src_reg,
+                .imm12 = 0,
+            } });
         },
         .memory => |addr| {
             // The value is in memory at a hard-coded address.
             // If the type is a pointer, it means the pointer address is at this memory location.
             try self.genSetReg(ty, reg, .{ .immediate = addr });
 
-            _ = try self.addInst(.{
-                .tag = .ld,
-                .data = .{ .i_type = .{
-                    .rd = reg,
-                    .rs1 = reg,
-                    .imm12 = 0,
-                } },
-            });
+            _ = try self.addInst(.{ .ld = .{
+                .rd = reg,
+                .rs1 = reg,
+                .imm12 = 0,
+            } });
             // LOAD imm=[i12 offset = 0], rs1 =
 
             // return self.fail("TODO implement genSetReg memory for riscv64");
