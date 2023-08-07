@@ -319,7 +319,7 @@ pub const Instruction = union(enum) {
     }
 
     pub fn sltiu(rd: Register, r1: Register, imm: u12) Instruction {
-        return iType(0b0010011, 0b011, rd, r1, imm);
+        return iType(0b0010011, 0b011, rd, r1, @intCast(imm));
     }
 
     // Arithmetic/Logical, Register-Immediate (32-bit)

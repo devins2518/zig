@@ -1014,6 +1014,16 @@ fn binOpRegister(
         .remw,
         .remu,
         .remuw,
+        .seq,
+        .sgt,
+        .sgtu,
+        .sgte,
+        .sgteu,
+        .slt,
+        .sltu,
+        .slte,
+        .slteu,
+        .sneq,
         => .{
             .rd = dest_reg,
             .rs1 = lhs_reg,
@@ -1039,6 +1049,16 @@ fn binOpRegister(
         .remw => self.addInst(.{ .remw = mir_data }),
         .remu => self.addInst(.{ .remu = mir_data }),
         .remuw => self.addInst(.{ .remuw = mir_data }),
+        .seq => self.addInst(.{ .seq = mir_data }),
+        .sgt => self.addInst(.{ .sgt = mir_data }),
+        .sgtu => self.addInst(.{ .sgtu = mir_data }),
+        .sgte => self.addInst(.{ .sgte = mir_data }),
+        .sgteu => self.addInst(.{ .sgteu = mir_data }),
+        .slt => self.addInst(.{ .slt = mir_data }),
+        .sltu => self.addInst(.{ .sltu = mir_data }),
+        .slte => self.addInst(.{ .slte = mir_data }),
+        .slteu => self.addInst(.{ .slteu = mir_data }),
+        .sneq => self.addInst(.{ .sneq = mir_data }),
         else => unreachable,
     };
 
@@ -1084,6 +1104,16 @@ fn binOp(
         .remw,
         .remu,
         .remuw,
+        .seq,
+        .sgt,
+        .sgtu,
+        .sgte,
+        .sgteu,
+        .slt,
+        .sltu,
+        .slte,
+        .slteu,
+        .sneq,
         => {
             switch (lhs_ty.zigTypeTag(mod)) {
                 .Float => return self.fail("TODO binary operations on floats", .{}),
@@ -1844,22 +1874,55 @@ fn airRetLoad(self: *Self, inst: Air.Inst.Index) !void {
 
 fn airCmp(self: *Self, inst: Air.Inst.Index, op: math.CompareOperator) !void {
     const bin_op = self.air.instructions.items(.data)[inst].bin_op;
-    if (self.liveness.isUnused(inst))
-        return self.finishAir(inst, .dead, .{ bin_op.lhs, bin_op.rhs, .none });
-    const ty = self.typeOf(bin_op.lhs);
-    const mod = self.bin_file.options.module.?;
-    assert(ty.eql(self.typeOf(bin_op.rhs), mod));
-    if (ty.zigTypeTag(mod) == .ErrorSet)
-        return self.fail("TODO implement cmp for errors", .{});
-
     const lhs = try self.resolveInst(bin_op.lhs);
     const rhs = try self.resolveInst(bin_op.rhs);
-    _ = op;
-    _ = lhs;
-    _ = rhs;
+    const lhs_ty = self.typeOf(bin_op.lhs);
 
-    return self.fail("TODO implement cmp for {}", .{self.target.cpu.arch});
-    // return self.finishAir(inst, result, .{ bin_op.lhs, bin_op.rhs, .none });
+    const result: MCValue = if (self.liveness.isUnused(inst))
+        .dead
+    else
+        try self.cmp(inst, lhs, rhs, lhs_ty, op);
+
+    return self.finishAir(inst, result, .{ bin_op.lhs, bin_op.rhs, .none });
+}
+
+fn cmp(
+    self: *Self,
+    maybe_inst: ?Air.Inst.Index,
+    lhs: MCValue,
+    rhs: MCValue,
+    lhs_ty: Type,
+    op: math.CompareOperator,
+) !MCValue {
+    const mod = self.bin_file.options.module.?;
+    const int_ty = switch (lhs_ty.zigTypeTag(mod)) {
+        .Int => lhs_ty,
+        else => return self.fail("TODO ARM non integer cmp", .{}),
+    };
+
+    const int_info = int_ty.intInfo(mod);
+    if (int_info.bits <= 64) {
+        return switch (op) {
+            .lt => switch (int_info.signedness) {
+                .signed => try self.binOp(.slt, maybe_inst, lhs, rhs, lhs_ty, lhs_ty),
+                .unsigned => try self.binOp(.sltu, maybe_inst, lhs, rhs, lhs_ty, lhs_ty),
+            },
+            .lte => switch (int_info.signedness) {
+                .signed => try self.binOp(.slte, maybe_inst, lhs, rhs, lhs_ty, lhs_ty),
+                .unsigned => try self.binOp(.slteu, maybe_inst, lhs, rhs, lhs_ty, lhs_ty),
+            },
+            .eq => try self.binOp(.seq, maybe_inst, lhs, rhs, lhs_ty, lhs_ty),
+            .gte => switch (int_info.signedness) {
+                .signed => try self.binOp(.sgte, maybe_inst, lhs, rhs, lhs_ty, lhs_ty),
+                .unsigned => try self.binOp(.sgteu, maybe_inst, lhs, rhs, lhs_ty, lhs_ty),
+            },
+            .gt => switch (int_info.signedness) {
+                .signed => try self.binOp(.sgt, maybe_inst, lhs, rhs, lhs_ty, lhs_ty),
+                .unsigned => try self.binOp(.sgtu, maybe_inst, lhs, rhs, lhs_ty, lhs_ty),
+            },
+            .neq => try self.binOp(.sneq, maybe_inst, lhs, rhs, lhs_ty, lhs_ty),
+        };
+    } else return self.fail("TODO riscv cmp for integer sizes > 64", .{});
 }
 
 fn airCmpVector(self: *Self, inst: Air.Inst.Index) !void {

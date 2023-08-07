@@ -61,12 +61,20 @@ pub fn emitMir(
             .remuw,
             .sll,
             .sllw,
+            .seq,
+            .sgt,
+            .sgtu,
+            .sgte,
+            .sgteu,
+            .sneq,
             .slt,
+            .sltu,
+            .slte,
+            .slteu,
             .sra,
             .sraw,
             .srl,
             .srlw,
-            .sltu,
             .sub,
             .subw,
             .xor,
@@ -200,14 +208,40 @@ fn mirRType(emit: *Emit, inst: Mir.Inst.Index) !void {
         .remw => |r_type| try emit.writeInstruction(Instruction.remw(r_type.rd, r_type.rs1, r_type.rs2)),
         .remu => |r_type| try emit.writeInstruction(Instruction.remu(r_type.rd, r_type.rs1, r_type.rs2)),
         .remuw => |r_type| try emit.writeInstruction(Instruction.remuw(r_type.rd, r_type.rs1, r_type.rs2)),
+        .seq => |r_type| {
+            try emit.writeInstruction(Instruction.xor(r_type.rd, r_type.rs1, r_type.rs2));
+            try emit.writeInstruction(Instruction.sltiu(r_type.rd, r_type.rd, 1));
+        },
+        .sgt => |r_type| try emit.writeInstruction(Instruction.slt(r_type.rd, r_type.rs2, r_type.rs1)),
+        .sgtu => |r_type| try emit.writeInstruction(Instruction.sltu(r_type.rd, r_type.rs2, r_type.rs1)),
+        .sgte => |r_type| {
+            try emit.writeInstruction(Instruction.slt(r_type.rd, r_type.rs1, r_type.rs2));
+            try emit.writeInstruction(Instruction.xori(r_type.rd, r_type.rd, 1));
+        },
+        .sgteu => |r_type| {
+            try emit.writeInstruction(Instruction.sltu(r_type.rd, r_type.rs1, r_type.rs2));
+            try emit.writeInstruction(Instruction.xori(r_type.rd, r_type.rd, 1));
+        },
+        .sneq => |r_type| {
+            try emit.writeInstruction(Instruction.xor(r_type.rd, r_type.rs1, r_type.rs2));
+            try emit.writeInstruction(Instruction.slt(r_type.rd, .zero, r_type.rd));
+        },
         .sll => |r_type| try emit.writeInstruction(Instruction.sll(r_type.rd, r_type.rs1, r_type.rs2)),
         .sllw => |r_type| try emit.writeInstruction(Instruction.sllw(r_type.rd, r_type.rs1, r_type.rs2)),
         .slt => |r_type| try emit.writeInstruction(Instruction.slt(r_type.rd, r_type.rs1, r_type.rs2)),
+        .sltu => |r_type| try emit.writeInstruction(Instruction.sltu(r_type.rd, r_type.rs1, r_type.rs2)),
+        .slte => |r_type| {
+            try emit.writeInstruction(Instruction.slt(r_type.rd, r_type.rs2, r_type.rs1));
+            try emit.writeInstruction(Instruction.xori(r_type.rd, r_type.rd, 1));
+        },
+        .slteu => |r_type| {
+            try emit.writeInstruction(Instruction.sltu(r_type.rd, r_type.rs2, r_type.rs1));
+            try emit.writeInstruction(Instruction.xori(r_type.rd, r_type.rd, 1));
+        },
         .sra => |r_type| try emit.writeInstruction(Instruction.sra(r_type.rd, r_type.rs1, r_type.rs2)),
         .sraw => |r_type| try emit.writeInstruction(Instruction.sraw(r_type.rd, r_type.rs1, r_type.rs2)),
         .srl => |r_type| try emit.writeInstruction(Instruction.srl(r_type.rd, r_type.rs1, r_type.rs2)),
         .srlw => |r_type| try emit.writeInstruction(Instruction.srlw(r_type.rd, r_type.rs1, r_type.rs2)),
-        .sltu => |r_type| try emit.writeInstruction(Instruction.sltu(r_type.rd, r_type.rs1, r_type.rs2)),
         .sub => |r_type| try emit.writeInstruction(Instruction.sub(r_type.rd, r_type.rs1, r_type.rs2)),
         .subw => |r_type| try emit.writeInstruction(Instruction.subw(r_type.rd, r_type.rs1, r_type.rs2)),
         .xor => |r_type| try emit.writeInstruction(Instruction.xor(r_type.rd, r_type.rs1, r_type.rs2)),
