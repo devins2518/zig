@@ -2357,10 +2357,31 @@ fn setRegOrMem(self: *Self, ty: Type, loc: MCValue, val: MCValue) !void {
 }
 
 fn genSetStack(self: *Self, ty: Type, stack_offset: u32, mcv: MCValue) InnerError!void {
-    _ = ty;
-    _ = stack_offset;
-    _ = mcv;
-    return self.fail("TODO implement getSetStack for {}", .{self.target.cpu.arch});
+    const mod = self.bin_file.options.module.?;
+    const abi_size = @as(u32, @intCast(ty.abiSize(mod)));
+    switch (mcv) {
+        .dead => unreachable,
+        .unreach, .none => return,
+        .register => |reg| {
+            assert(std.mem.isAlignedGeneric(u32, stack_offset, abi_size));
+
+            const s_type: Mir.Inst.SType = .{
+                .rs2 = reg,
+                .rs1 = .sp,
+                .imm12 = @intCast(@as(u12, @truncate(stack_offset))), // TODO
+            };
+            const inst: Mir.Inst = switch (abi_size) {
+                1 => .{ .sb = s_type },
+                2 => .{ .sh = s_type },
+                4 => .{ .sw = s_type },
+                8 => .{ .sd = s_type },
+                else => return self.fail("TODO implement genSetStack for register abi_size={}", .{abi_size}),
+            };
+
+            _ = try self.addInst(inst);
+        },
+        else => return self.fail("TODO implement genSetStack for other MCVs", .{}),
+    }
 }
 
 fn genSetReg(self: *Self, ty: Type, reg: Register, mcv: MCValue) InnerError!void {
