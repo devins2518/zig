@@ -1668,9 +1668,23 @@ fn structFieldPtr(self: *Self, operand: Air.Inst.Ref, ty: Air.Inst.Ref, index: u
 fn airStructFieldVal(self: *Self, inst: Air.Inst.Index) !void {
     const ty_pl = self.air.instructions.items(.data)[inst].ty_pl;
     const extra = self.air.extraData(Air.StructField, ty_pl.payload).data;
-    _ = extra;
-    return self.fail("TODO implement codegen struct_field_val", .{});
-    //return self.finishAir(inst, result, .{ extra.struct_ptr, .none, .none });
+    const operand = extra.struct_operand;
+    const index = extra.field_index;
+    const result: MCValue = if (self.liveness.isUnused(inst)) .dead else result: {
+        const mod = self.bin_file.options.module.?;
+        const mcv = try self.resolveInst(operand);
+        const struct_ty = self.typeOf(operand);
+        const struct_field_offset = @as(u32, @intCast(struct_ty.structFieldOffset(index, mod)));
+
+        break :result switch (mcv) {
+            .dead, .unreach => unreachable,
+            .stack_offset => |off| MCValue{ .stack_offset = off - struct_field_offset },
+            .memory => |addr| MCValue{ .memory = addr + struct_field_offset },
+            else => return self.fail("TODO implement codegen struct_field_val for {}", .{mcv}),
+        };
+    };
+
+    return self.finishAir(inst, result, .{ extra.struct_operand, .none, .none });
 }
 
 fn airFieldParentPtr(self: *Self, inst: Air.Inst.Index) !void {
