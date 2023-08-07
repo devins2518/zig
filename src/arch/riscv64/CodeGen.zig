@@ -2350,6 +2350,7 @@ fn genSetStack(self: *Self, ty: Type, stack_offset: u32, mcv: MCValue) InnerErro
 }
 
 fn genSetReg(self: *Self, ty: Type, reg: Register, mcv: MCValue) InnerError!void {
+    const mod = self.bin_file.options.module.?;
     switch (mcv) {
         .dead => unreachable,
         .ptr_stack_offset => unreachable,
@@ -2415,7 +2416,21 @@ fn genSetReg(self: *Self, ty: Type, reg: Register, mcv: MCValue) InnerError!void
 
             // return self.fail("TODO implement genSetReg memory for riscv64");
         },
-        else => return self.fail("TODO implement getSetReg for riscv64 {}", .{mcv}),
+        .stack_offset => |offset| {
+            const load_payload: Mir.Inst.IType = .{
+                .rd = reg,
+                .rs1 = .sp,
+                .imm12 = @intCast(@as(u12, @truncate(offset))),
+            };
+            const load_instruction: Mir.Inst = switch (ty.abiSize(mod)) {
+                1 => .{ .lb = load_payload },
+                2 => .{ .lh = load_payload },
+                4 => .{ .lw = load_payload },
+                8 => .{ .ld = load_payload },
+                else => return self.fail("TODO implement getSetReg for riscv64 {}", .{mcv}),
+            };
+            _ = try self.addInst(load_instruction);
+        },
     }
 }
 
