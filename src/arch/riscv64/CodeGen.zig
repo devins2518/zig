@@ -2434,7 +2434,6 @@ fn genSetReg(self: *Self, ty: Type, reg: Register, mcv: MCValue) InnerError!void
             _ = try self.addInst(.{ .mv = .{
                 .rd = reg,
                 .rs1 = src_reg,
-                .imm12 = 0,
             } });
         },
         .memory => |addr| {

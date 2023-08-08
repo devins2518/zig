@@ -62,7 +62,7 @@ pub const Inst = union(Tag) {
     mulh: RType,
     mulhsu: RType,
     mulhu: RType,
-    mv: IType,
+    mv: RRType,
     nop,
     @"or": RType,
     ori: IType,
@@ -73,6 +73,7 @@ pub const Inst = union(Tag) {
     sb: SType,
     sd: SType,
     seq: RType,
+    seqz: RRType,
     sgt: RType,
     sgtu: RType,
     sgte: RType,
@@ -88,6 +89,7 @@ pub const Inst = union(Tag) {
     slte: RType,
     slteu: RType,
     slti: IType,
+    snez: RRType,
     sra: RType,
     sraw: RType,
     srai: IType,
@@ -213,6 +215,8 @@ pub const Inst = union(Tag) {
         sd,
         /// Pseudo-instruction: Set if equal
         seq,
+        /// Pseudo-instruction: Set if equal to zero
+        seqz,
         /// Pseudo-isntruction: Set if greater than
         sgt,
         /// Pseudo-isntruction: Set if greater than or equal
@@ -241,6 +245,8 @@ pub const Inst = union(Tag) {
         slteu,
         /// Pseudo-instruction: Set if not equal to
         sneq,
+        /// Pseudo-instruction: Set if not equal to zero
+        snez,
         /// 64-bit shift right arithmetic
         sra,
         /// 32-bit shift right arithmetic
@@ -277,6 +283,14 @@ pub const Inst = union(Tag) {
 
     /// The position of an MIR instruction within the `Mir` instructions array.
     pub const Index = u32;
+
+    /// R-R Type (to be used only for pseudo-instructions)
+    ///
+    /// Used in e.g. mv
+    pub const RRType = struct {
+        rd: Register,
+        rs1: Register,
+    };
 
     /// I-Type
     ///
