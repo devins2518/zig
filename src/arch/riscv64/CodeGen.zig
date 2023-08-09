@@ -1250,8 +1250,196 @@ fn airSubWithOverflow(self: *Self, inst: Air.Inst.Index) !void {
 }
 
 fn airMulWithOverflow(self: *Self, inst: Air.Inst.Index) !void {
-    _ = inst;
-    return self.fail("TODO implement airMulWithOverflow for {}", .{self.target.cpu.arch});
+    if (!self.target.cpu.features.isEnabled(@intFromEnum(std.Target.riscv.Feature.m)))
+        return self.fail("TODO: implement mul_with_overflow without M extension", .{});
+
+    const ty_pl = self.air.instructions.items(.data)[inst].ty_pl;
+    const extra = self.air.extraData(Air.Bin, ty_pl.payload).data;
+    if (self.liveness.isUnused(inst)) return self.finishAir(inst, .dead, .{ extra.lhs, extra.rhs, .none });
+    const mod = self.bin_file.options.module.?;
+    const result: MCValue = result: {
+        const lhs = try self.resolveInst(extra.lhs);
+        const rhs = try self.resolveInst(extra.rhs);
+        const lhs_ty = self.typeOf(extra.lhs);
+        const rhs_ty = self.typeOf(extra.rhs);
+
+        const tuple_ty = self.typeOfIndex(inst);
+        const tuple_size = @as(u32, @intCast(tuple_ty.abiSize(mod)));
+        const tuple_align = tuple_ty.abiAlignment(mod);
+        const overflow_offset = @as(u32, @intCast(tuple_ty.structFieldOffset(1, mod)));
+
+        switch (lhs_ty.zigTypeTag(mod)) {
+            .Vector => return self.fail("TODO implement mul_with_overflow for vectors", .{}),
+            .Int => {
+                assert(lhs_ty.eql(rhs_ty, mod));
+                const int_info = lhs_ty.intInfo(mod);
+                if (int_info.bits < 32) {
+                    // Do the multiplication
+                    const mul_result = try self.binOp(.mul, null, lhs, rhs, lhs_ty, rhs_ty);
+                    const mul_reg = mul_result.register;
+                    const mul_reg_lock = self.register_manager.lockRegAssumeUnused(mul_reg);
+                    defer self.register_manager.unlockReg(mul_reg_lock);
+
+                    const overflow_register = try self.register_manager.allocReg(null, gp);
+                    const overflow_lock = self.register_manager.lockRegAssumeUnused(overflow_register);
+                    defer self.register_manager.unlockReg(overflow_lock);
+
+                    // Move overflow bits into overflow register
+                    switch (int_info.signedness) {
+                        .unsigned => _ = try self.addInst(.{ .srli = .{
+                            .rd = overflow_register,
+                            .rs1 = mul_result.register,
+                            .imm12 = @bitCast(@as(u12, @truncate(int_info.bits))),
+                        } }),
+                        .signed => {
+                            _ = try self.addInst(.{ .slli = .{
+                                .rd = overflow_register,
+                                .rs1 = mul_result.register,
+                                .imm12 = @bitCast(@as(u12, @truncate(64 - int_info.bits))),
+                            } });
+                            _ = try self.addInst(.{ .srli = .{
+                                .rd = overflow_register,
+                                .rs1 = overflow_register,
+                                .imm12 = @bitCast(@as(u12, @truncate(64 - int_info.bits))),
+                            } });
+                        },
+                    }
+                    // If any bits are set, there was overflow
+                    _ = try self.addInst(.{ .snez = .{
+                        .rd = overflow_register,
+                        .rs1 = overflow_register,
+                    } });
+                    // Move result into proper place in the struct
+                    _ = try self.addInst(.{ .slli = .{
+                        .rd = overflow_register,
+                        .rs1 = overflow_register,
+                        .imm12 = @bitCast(@as(u12, @truncate(overflow_offset * 8))),
+                    } });
+                    // Combine both into a single register
+                    _ = try self.addInst(.{ .@"or" = .{
+                        .rd = mul_reg,
+                        .rs1 = mul_reg,
+                        .rs2 = overflow_register,
+                    } });
+                    return self.fail("TODO implement mul_with_overflow for integers < u32/i32", .{});
+                } else if (int_info.bits == 32) {
+                    // This implementation assumes the result can be returned through a single register
+                    // of the form [overflow:result].
+                    assert(tuple_size == 8);
+                    assert(tuple_align == 4);
+                    assert(overflow_offset == 4);
+
+                    // TODO: Can't reuse registers if lhs or rhs die after this instruction
+                    // TODO: Can reduce the amount of instructions if result is laid out as [result:overflow]
+                    const mul_and_overflow_register = switch (int_info.signedness) {
+                        .unsigned => dest: {
+                            // Strategy here is to check that the upper 64 bits of the
+                            // multiplication done with values shifted to the left by 32 has any
+                            // bits in the upper 32 set.
+                            const shifted_lhs_register = try self.register_manager.allocReg(null, gp);
+                            const shifted_lhs_lock = self.register_manager.lockRegAssumeUnused(shifted_lhs_register);
+                            defer self.register_manager.unlockReg(shifted_lhs_lock);
+
+                            const shifted_rhs_register = try self.register_manager.allocReg(null, gp);
+                            const shifted_rhs_lock = self.register_manager.lockRegAssumeUnused(shifted_rhs_register);
+                            defer self.register_manager.unlockReg(shifted_rhs_lock);
+
+                            // Set up lhs for upper multiplication
+                            _ = try self.addInst(.{ .slli = .{
+                                .rd = shifted_lhs_register,
+                                .rs1 = lhs.register,
+                                .imm12 = 32,
+                            } });
+                            // Set up rhs for upper multiplication
+                            _ = try self.addInst(.{ .slli = .{
+                                .rd = shifted_rhs_register,
+                                .rs1 = rhs.register,
+                                .imm12 = 32,
+                            } });
+                            // Do the multiplication
+                            _ = try self.addInst(.{ .mulhu = .{
+                                .rd = shifted_lhs_register,
+                                .rs1 = shifted_lhs_register,
+                                .rs2 = shifted_rhs_register,
+                            } });
+                            // Put the upper 32 bits of the multiplication result into the overflow register
+                            _ = try self.addInst(.{ .srli = .{
+                                .rd = shifted_rhs_register,
+                                .rs1 = shifted_lhs_register,
+                                .imm12 = 32,
+                            } });
+                            // If any bits are set, there was overflow
+                            _ = try self.addInst(.{ .snez = .{
+                                .rd = shifted_rhs_register,
+                                .rs1 = shifted_rhs_register,
+                            } });
+                            break :dest .{ .mul = shifted_lhs_register, .overflow = shifted_rhs_register };
+                        },
+                        .signed => dest: {
+                            // Strategy here is to check that sign-extended 32-bit multiply and
+                            // lower 64 bits of 64-bit multiply produce the same result
+                            const mul_result = try self.binOp(.mul, null, lhs, rhs, lhs_ty, rhs_ty);
+                            const mul_register = mul_result.register;
+                            const mul_lock = self.register_manager.lockRegAssumeUnused(mul_register);
+                            defer self.register_manager.unlockReg(mul_lock);
+
+                            const mulw_result = try self.binOp(.mulw, null, lhs, rhs, lhs_ty, rhs_ty);
+                            const mulw_register = mulw_result.register;
+                            const mulw_lock = self.register_manager.lockRegAssumeUnused(mulw_register);
+                            defer self.register_manager.unlockReg(mulw_lock);
+
+                            const overflow_reg = try self.register_manager.allocReg(null, gp);
+                            const overflow_reg_lock = self.register_manager.lockRegAssumeUnused(overflow_reg);
+                            defer self.register_manager.unlockReg(overflow_reg_lock);
+                            // Overflow register will be non-zero if the results differ
+                            _ = try self.addInst(.{ .xor = .{
+                                .rd = overflow_reg,
+                                .rs1 = mul_register,
+                                .rs2 = mulw_register,
+                            } });
+                            // If any bits are set, then there was overflow
+                            _ = try self.addInst(.{ .snez = .{
+                                .rd = overflow_reg,
+                                .rs1 = overflow_reg,
+                            } });
+                            break :dest .{ .mul = mul_register, .overflow = overflow_reg };
+                        },
+                    };
+                    // Now we combine the two results into a single register
+                    const mul_register = mul_and_overflow_register.mul;
+                    const overflow_register = mul_and_overflow_register.overflow;
+                    // Move overflow bit to upper 32 bits
+                    _ = try self.addInst(.{ .slli = .{
+                        .rd = overflow_register,
+                        .rs1 = overflow_register,
+                        .imm12 = 32,
+                    } });
+                    // Zero out upper 32 bits of multiply result
+                    _ = try self.addInst(.{ .slli = .{
+                        .rd = mul_register,
+                        .rs1 = mul_register,
+                        .imm12 = 32,
+                    } });
+                    _ = try self.addInst(.{ .srli = .{
+                        .rd = mul_register,
+                        .rs1 = mul_register,
+                        .imm12 = 32,
+                    } });
+                    // Combine the results into one register
+                    _ = try self.addInst(.{ .@"or" = .{
+                        .rd = mul_register,
+                        .rs1 = mul_register,
+                        .rs2 = overflow_register,
+                    } });
+                    break :result MCValue{ .register = mul_register };
+                } else if (int_info.bits <= 64) {
+                    return self.fail("TODO implement mul_with_overflow for integers <= u64/i64", .{});
+                } else return self.fail("TODO implement mul_with_overflow for integers > u64/i64", .{});
+            },
+            else => unreachable,
+        }
+    };
+    return self.finishAir(inst, result, .{ extra.lhs, extra.rhs, .none });
 }
 
 fn airShlWithOverflow(self: *Self, inst: Air.Inst.Index) !void {
@@ -1697,10 +1885,10 @@ fn airStructFieldVal(self: *Self, inst: Air.Inst.Index) !void {
                 defer if (dest_lock) |d_l| self.register_manager.unlockReg(d_l);
 
                 const useless_bits_on_left: i12 = @bitCast(@as(u12, @truncate(
-                    struct_ty_bit_size - (struct_field_bit_size + struct_field_offset),
+                    struct_ty_bit_size - (struct_field_bit_size + struct_field_offset * 8),
                 )));
                 const left_shift_amt: i12 = 64 - useless_bits_on_left;
-                const useless_bits_on_right: i12 = @bitCast(@as(u12, @truncate(struct_field_offset)));
+                const useless_bits_on_right: i12 = @bitCast(@as(u12, @truncate(struct_field_offset * 8)));
                 const right_shift_amt: i12 = left_shift_amt + useless_bits_on_right;
 
                 if (left_shift_amt > 0) _ = try self.addInst(.{ .slli = .{
