@@ -1674,12 +1674,48 @@ fn airStructFieldVal(self: *Self, inst: Air.Inst.Index) !void {
         const mod = self.bin_file.options.module.?;
         const mcv = try self.resolveInst(operand);
         const struct_ty = self.typeOf(operand);
+        const struct_ty_bit_size = struct_ty.abiSize(mod) * 8;
         const struct_field_offset = @as(u32, @intCast(struct_ty.structFieldOffset(index, mod)));
+        const struct_field_bit_size = struct_ty.structFieldType(index, mod).abiSize(mod) * 8;
 
         break :result switch (mcv) {
             .dead, .unreach => unreachable,
             .stack_offset => |off| MCValue{ .stack_offset = off - struct_field_offset },
             .memory => |addr| MCValue{ .memory = addr + struct_field_offset },
+            .register => |register| {
+                const reg_lock = self.register_manager.lockRegAssumeUnused(register);
+                defer self.register_manager.unlockReg(reg_lock);
+
+                const dest = if (self.reuseOperand(inst, operand, 0, mcv))
+                    register
+                else
+                    try self.register_manager.allocReg(inst, gp);
+                const dest_lock = if (register != dest)
+                    self.register_manager.lockRegAssumeUnused(dest)
+                else
+                    null;
+                defer if (dest_lock) |d_l| self.register_manager.unlockReg(d_l);
+
+                const useless_bits_on_left: i12 = @bitCast(@as(u12, @truncate(
+                    struct_ty_bit_size - (struct_field_bit_size + struct_field_offset),
+                )));
+                const left_shift_amt: i12 = 64 - useless_bits_on_left;
+                const useless_bits_on_right: i12 = @bitCast(@as(u12, @truncate(struct_field_offset)));
+                const right_shift_amt: i12 = left_shift_amt + useless_bits_on_right;
+
+                if (left_shift_amt > 0) _ = try self.addInst(.{ .slli = .{
+                    .rd = dest,
+                    .rs1 = dest,
+                    .imm12 = left_shift_amt,
+                } });
+                if (right_shift_amt > 0) _ = try self.addInst(.{ .srli = .{
+                    .rd = dest,
+                    .rs1 = dest,
+                    .imm12 = right_shift_amt,
+                } });
+
+                break :result MCValue{ .register = dest };
+            },
             else => return self.fail("TODO implement codegen struct_field_val for {}", .{mcv}),
         };
     };
