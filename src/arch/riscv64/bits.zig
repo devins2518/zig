@@ -303,15 +303,15 @@ pub const Instruction = union(enum) {
     }
 
     pub fn slli(rd: Register, r1: Register, shamt: i12) Instruction {
-        return iType(0b0010011, 0b001, rd, r1, @as(i6, @truncate(shamt)));
+        return iType(0b0010011, 0b001, rd, r1, shamt & 0x003f);
     }
 
     pub fn srli(rd: Register, r1: Register, shamt: i12) Instruction {
-        return iType(0b0010011, 0b101, rd, r1, @as(i6, @truncate(shamt)));
+        return iType(0b0010011, 0b101, rd, r1, shamt & 0x003f);
     }
 
     pub fn srai(rd: Register, r1: Register, shamt: i12) Instruction {
-        return iType(0b0010011, 0b101, rd, r1, (1 << 10) + @as(i12, @as(i6, @truncate(shamt))));
+        return iType(0b0010011, 0b101, rd, r1, (1 << 10) + (shamt & 0x003f));
     }
 
     pub fn slti(rd: Register, r1: Register, imm: i12) Instruction {
@@ -319,7 +319,7 @@ pub const Instruction = union(enum) {
     }
 
     pub fn sltiu(rd: Register, r1: Register, imm: u12) Instruction {
-        return iType(0b0010011, 0b011, rd, r1, @intCast(imm));
+        return iType(0b0010011, 0b011, rd, r1, @bitCast(imm));
     }
 
     // Arithmetic/Logical, Register-Immediate (32-bit)
@@ -329,15 +329,15 @@ pub const Instruction = union(enum) {
     }
 
     pub fn slliw(rd: Register, r1: Register, shamt: i12) Instruction {
-        return iType(0b0011011, 0b001, rd, r1, @as(i12, @as(i5, @truncate(shamt))));
+        return iType(0b0011011, 0b001, rd, r1, shamt & 0x001f);
     }
 
     pub fn srliw(rd: Register, r1: Register, shamt: i12) Instruction {
-        return iType(0b0011011, 0b101, rd, r1, @as(i12, @as(i5, @truncate(shamt))));
+        return iType(0b0011011, 0b101, rd, r1, shamt & 0x001f);
     }
 
     pub fn sraiw(rd: Register, r1: Register, shamt: i12) Instruction {
-        return iType(0b0011011, 0b101, rd, r1, (1 << 10) + @as(i12, @as(i5, @truncate(shamt))));
+        return iType(0b0011011, 0b101, rd, r1, (1 << 10) + (shamt & 0x001f));
     }
 
     // Upper Immediate
