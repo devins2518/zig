@@ -73,22 +73,31 @@ pub const Inst = union(Tag) {
     sb: SType,
     sd: SType,
     seq: RType,
+    seqi: IType,
     seqz: RRType,
     sgt: RType,
-    sgtu: RType,
+    sgti: IType,
     sgte: RType,
+    sgtei: IType,
+    sgtu: RType,
+    sgtui: IType,
     sgteu: RType,
+    sgteui: IType,
     sh: SType,
-    sneq: RType,
     sll: RType,
     sllw: RType,
     slli: IType,
     slliw: IType,
     slt: RType,
-    sltu: RType,
-    slte: RType,
-    slteu: RType,
     slti: IType,
+    sltu: RType,
+    sltui: IType,
+    slte: RType,
+    sltei: IType,
+    slteu: RType,
+    slteui: IType,
+    sneq: RType,
+    sneqi: IType,
     snez: RRType,
     sra: RType,
     sraw: RType,
@@ -215,16 +224,26 @@ pub const Inst = union(Tag) {
         sd,
         /// Pseudo-instruction: Set if equal
         seq,
+        /// Pseudo-instruction: Set if equal immediate
+        seqi,
         /// Pseudo-instruction: Set if equal to zero
         seqz,
         /// Pseudo-isntruction: Set if greater than
         sgt,
+        /// Pseudo-isntruction: Set if greater than immediate
+        sgti,
         /// Pseudo-isntruction: Set if greater than or equal
         sgte,
+        /// Pseudo-isntruction: Set if greater than or equal immediate
+        sgtei,
         /// Pseudo-isntruction: Set if unsigned greater than
         sgtu,
+        /// Pseudo-isntruction: Set if unsigned greater than immediate
+        sgtui,
         /// Pseudo-isntruction: Set if unsigned greater than or equal
         sgteu,
+        /// Pseudo-isntruction: Set if unsigned greater than or equal immediate
+        sgteui,
         /// Store half word to memory
         sh,
         /// 64-bit shift left logical
@@ -237,14 +256,24 @@ pub const Inst = union(Tag) {
         slliw,
         /// Set if less than
         slt,
-        /// Set to immediate if unsigned less than
+        /// Set if less than immediate
+        slti,
+        /// Set if unsigned less than
         sltu,
+        /// Set if unsigned less than immediate
+        sltui,
         /// Pseudo-instruction: Set if less than or equal to
         slte,
+        /// Pseudo-instruction: Set if less than or equal to immediate
+        sltei,
         /// Pseudo-instruction: Set if unsigned less than or equal to
         slteu,
+        /// Pseudo-instruction: Set if unsigned less than or equal to immediate
+        slteui,
         /// Pseudo-instruction: Set if not equal to
         sneq,
+        /// Pseudo-instruction: Set if not equal to immediate
+        sneqi,
         /// Pseudo-instruction: Set if not equal to zero
         snez,
         /// 64-bit shift right arithmetic
@@ -263,8 +292,6 @@ pub const Inst = union(Tag) {
         srli,
         /// 32-bit shift right logical by immediate
         srliw,
-        /// Set to immediate if less than
-        slti,
         /// 64-bit subtraction
         sub,
         /// 32-bit subtraction
