@@ -306,6 +306,12 @@ pub const Inst = union(Tag) {
         xor,
         /// Bitwise exclusive or immediate
         xori,
+
+        pub fn isIType(self: Mir.Inst.Tag) bool {
+            return switch (self) {
+                inline else => |tag| std.meta.fields(Mir.Inst)[@intFromEnum(tag)].type == IType,
+            };
+        }
     };
 
     /// The position of an MIR instruction within the `Mir` instructions array.

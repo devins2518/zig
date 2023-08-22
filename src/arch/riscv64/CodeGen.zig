@@ -1004,6 +1004,95 @@ fn airSlice(self: *Self, inst: Air.Inst.Index) !void {
 
 /// Don't call this function directly. Use binOp instead.
 ///
+/// Calling this function signals an intention to generate a Mir instruction of the form
+///
+///     op dest, lhs, imm12
+///
+/// Asserts that generating an instruction of that form is possible. This usually involves
+/// asserting the constant can fit in a i12.
+fn binOpImmediate(
+    self: *Self,
+    mir_tag: Mir.Inst.Tag,
+    maybe_metadata: ?BinOpMetadata,
+    lhs: MCValue,
+    rhs: MCValue,
+    lhs_ty: Type,
+) !MCValue {
+    var lhs_reg: Register = undefined;
+    var dest_reg: Register = undefined;
+
+    const lhs_is_immediate = lhs == .immediate;
+
+    const immediate = if (lhs_is_immediate) lhs.immediate else rhs.immediate;
+
+    const lhs_bind = blk: {
+        if (maybe_metadata) |md| {
+            const inst = if (lhs_is_immediate) md.rhs else md.lhs;
+            break :blk ReadArg.Bind{ .inst = inst };
+        } else {
+            break :blk ReadArg.Bind{ .mcv = lhs };
+        }
+    };
+
+    const read_args = [_]ReadArg{
+        .{ .ty = lhs_ty, .bind = lhs_bind, .class = gp, .reg = &lhs_reg },
+    };
+    const write_args = [_]WriteArg{
+        .{ .ty = lhs_ty, .bind = .none, .class = gp, .reg = &dest_reg },
+    };
+    const operand_mapping: []const Liveness.OperandInt = if (lhs_is_immediate) &.{1} else &.{0};
+    try self.allocRegs(
+        &read_args,
+        &write_args,
+        if (maybe_metadata) |md| .{
+            .corresponding_inst = md.inst,
+            .operand_mapping = operand_mapping,
+        } else null,
+    );
+
+    const mir_data: Mir.Inst.IType = .{
+        .rd = dest_reg,
+        .rs1 = lhs_reg,
+        .imm12 = @bitCast(@as(u12, @truncate(immediate))),
+    };
+
+    _ = try switch (mir_tag) {
+        .addi => self.addInst(.{ .addi = mir_data }),
+        .addiw => self.addInst(.{ .addiw = mir_data }),
+        .andi => self.addInst(.{ .andi = mir_data }),
+        .csrrw => self.addInst(.{ .csrrw = mir_data }),
+        .csrrs => self.addInst(.{ .csrrs = mir_data }),
+        .csrrc => self.addInst(.{ .csrrc = mir_data }),
+        .csrrwi => self.addInst(.{ .csrrwi = mir_data }),
+        .csrrsi => self.addInst(.{ .csrrsi = mir_data }),
+        .csrrci => self.addInst(.{ .csrrci = mir_data }),
+        .fence => self.addInst(.{ .fence = mir_data }),
+        .fence_i => self.addInst(.{ .fence_i = mir_data }),
+        .jalr => self.addInst(.{ .jalr = mir_data }),
+        .lb => self.addInst(.{ .lb = mir_data }),
+        .lbu => self.addInst(.{ .lbu = mir_data }),
+        .lh => self.addInst(.{ .lh = mir_data }),
+        .lhu => self.addInst(.{ .lhu = mir_data }),
+        .lw => self.addInst(.{ .lw = mir_data }),
+        .lwu => self.addInst(.{ .lwu = mir_data }),
+        .ld => self.addInst(.{ .ld = mir_data }),
+        .ori => self.addInst(.{ .ori = mir_data }),
+        .slli => self.addInst(.{ .slli = mir_data }),
+        .slliw => self.addInst(.{ .slliw = mir_data }),
+        .slti => self.addInst(.{ .slti = mir_data }),
+        .srai => self.addInst(.{ .srai = mir_data }),
+        .sraiw => self.addInst(.{ .sraiw = mir_data }),
+        .srli => self.addInst(.{ .srli = mir_data }),
+        .srliw => self.addInst(.{ .srliw = mir_data }),
+        .xori => self.addInst(.{ .xori = mir_data }),
+        else => unreachable,
+    };
+
+    return MCValue{ .register = dest_reg };
+}
+
+/// Don't call this function directly. Use binOp instead.
+///
 /// Calling this function signals an intention to generate a Mir
 /// instruction of the form
 ///
@@ -1013,67 +1102,39 @@ fn airSlice(self: *Self, inst: Air.Inst.Index) !void {
 fn binOpRegister(
     self: *Self,
     mir_tag: Mir.Inst.Tag,
-    maybe_inst: ?Air.Inst.Index,
+    maybe_metadata: ?BinOpMetadata,
     lhs: MCValue,
     rhs: MCValue,
     lhs_ty: Type,
     rhs_ty: Type,
 ) !MCValue {
-    const lhs_is_register = lhs == .register;
-    const rhs_is_register = rhs == .register;
+    var lhs_reg: Register = undefined;
+    var rhs_reg: Register = undefined;
+    var dest_reg: Register = undefined;
 
-    const lhs_lock: ?RegisterLock = if (lhs_is_register)
-        self.register_manager.lockReg(lhs.register)
+    const lhs_bind = if (maybe_metadata) |md|
+        ReadArg.Bind{ .inst = md.lhs }
     else
-        null;
-    defer if (lhs_lock) |reg| self.register_manager.unlockReg(reg);
-
-    const branch = &self.branch_stack.items[self.branch_stack.items.len - 1];
-
-    const lhs_reg = if (lhs_is_register) lhs.register else blk: {
-        const track_inst: ?Air.Inst.Index = if (maybe_inst) |inst| inst: {
-            const bin_op = self.air.instructions.items(.data)[inst].bin_op;
-            break :inst Air.refToIndex(bin_op.lhs).?;
-        } else null;
-
-        const reg = try self.register_manager.allocReg(track_inst, gp);
-
-        if (track_inst) |inst| branch.inst_table.putAssumeCapacity(inst, .{ .register = reg });
-
-        break :blk reg;
+        ReadArg.Bind{ .mcv = lhs };
+    const rhs_bind = if (maybe_metadata) |md|
+        ReadArg.Bind{ .inst = md.rhs }
+    else
+        ReadArg.Bind{ .mcv = rhs };
+    const read_args = [_]ReadArg{
+        .{ .ty = lhs_ty, .bind = lhs_bind, .class = gp, .reg = &lhs_reg },
+        .{ .ty = rhs_ty, .bind = rhs_bind, .class = gp, .reg = &rhs_reg },
     };
-    const new_lhs_lock = self.register_manager.lockReg(lhs_reg);
-    defer if (new_lhs_lock) |reg| self.register_manager.unlockReg(reg);
-
-    const rhs_reg = if (rhs_is_register) rhs.register else blk: {
-        const track_inst: ?Air.Inst.Index = if (maybe_inst) |inst| inst: {
-            const bin_op = self.air.instructions.items(.data)[inst].bin_op;
-            break :inst Air.refToIndex(bin_op.rhs).?;
-        } else null;
-
-        const reg = try self.register_manager.allocReg(track_inst, gp);
-
-        if (track_inst) |inst| branch.inst_table.putAssumeCapacity(inst, .{ .register = reg });
-
-        break :blk reg;
+    const write_args = [_]WriteArg{
+        .{ .ty = lhs_ty, .bind = .none, .class = gp, .reg = &dest_reg },
     };
-    const new_rhs_lock = self.register_manager.lockReg(rhs_reg);
-    defer if (new_rhs_lock) |reg| self.register_manager.unlockReg(reg);
-
-    const dest_reg = if (maybe_inst) |inst| blk: {
-        const bin_op = self.air.instructions.items(.data)[inst].bin_op;
-
-        if (lhs_is_register and self.reuseOperand(inst, bin_op.lhs, 0, lhs)) {
-            break :blk lhs_reg;
-        } else if (rhs_is_register and self.reuseOperand(inst, bin_op.rhs, 1, rhs)) {
-            break :blk rhs_reg;
-        } else {
-            break :blk try self.register_manager.allocReg(inst, gp);
-        }
-    } else try self.register_manager.allocReg(null, gp);
-
-    if (!lhs_is_register) try self.genSetReg(lhs_ty, lhs_reg, lhs);
-    if (!rhs_is_register) try self.genSetReg(rhs_ty, rhs_reg, rhs);
+    try self.allocRegs(
+        &read_args,
+        &write_args,
+        if (maybe_metadata) |md| .{
+            .corresponding_inst = md.inst,
+            .operand_mapping = &.{ 0, 1 },
+        } else null,
+    );
 
     const mir_data: Mir.Inst.RType = switch (mir_tag) {
         .add,
@@ -1157,7 +1218,7 @@ fn binOpRegister(
 fn binOp(
     self: *Self,
     mir_tag: Mir.Inst.Tag,
-    maybe_inst: ?Air.Inst.Index,
+    maybe_metadata: ?BinOpMetadata,
     lhs: MCValue,
     rhs: MCValue,
     lhs_ty: Type,
@@ -1199,8 +1260,10 @@ fn binOp(
                     assert(lhs_ty.eql(rhs_ty, mod));
                     const int_info = lhs_ty.intInfo(mod);
                     if (int_info.bits <= 64) {
-                        // TODO immediate operands
-                        return try self.binOpRegister(mir_tag, maybe_inst, lhs, rhs, lhs_ty, rhs_ty);
+                        if ((rhs == .immediate or lhs == .immediate) and mir_tag.isIType())
+                            return try self.binOpImmediate(mir_tag, maybe_metadata, lhs, rhs, lhs_ty)
+                        else
+                            return try self.binOpRegister(mir_tag, maybe_metadata, lhs, rhs, lhs_ty, rhs_ty);
                     } else {
                         return self.fail("TODO binary operations on int with bits > 64", .{});
                     }
@@ -1215,13 +1278,14 @@ fn binOp(
 fn ptrArithmetic(
     self: *Self,
     tag: Air.Inst.Tag,
-    lhs: MCValue,
-    rhs: MCValue,
+    bin_op: Air.Bin,
     lhs_ty: Type,
     rhs_ty: Type,
     maybe_inst: ?Air.Inst.Index,
 ) InnerError!MCValue {
     const mod = self.bin_file.options.module.?;
+    const lhs = try self.resolveInst(bin_op.lhs);
+    const rhs = try self.resolveInst(bin_op.rhs);
     switch (lhs_ty.zigTypeTag(mod)) {
         .Pointer => {
             const ptr_ty = lhs_ty;
@@ -1238,7 +1302,13 @@ fn ptrArithmetic(
                     else => unreachable,
                 };
 
-                return try self.binOp(base_tag, maybe_inst, lhs, rhs, lhs_ty, rhs_ty);
+                const maybe_metadata = if (maybe_inst) |inst| BinOpMetadata{
+                    .inst = inst,
+                    .lhs = bin_op.lhs,
+                    .rhs = bin_op.rhs,
+                } else null;
+
+                return try self.binOp(base_tag, maybe_metadata, lhs, rhs, lhs_ty, rhs_ty);
             } else {
                 return self.fail("TODO ptr_add with elem_size > 1", .{});
             }
@@ -1253,10 +1323,15 @@ fn airBinOp(self: *Self, inst: Air.Inst.Index, tag: Air.Inst.Tag) !void {
     const rhs = try self.resolveInst(bin_op.rhs);
     const lhs_ty = self.typeOf(bin_op.lhs);
     const rhs_ty = self.typeOf(bin_op.rhs);
+    const metadata = BinOpMetadata{
+        .inst = inst,
+        .lhs = bin_op.lhs,
+        .rhs = bin_op.rhs,
+    };
 
-    const result: MCValue = if (self.liveness.isUnused(inst)) .dead else switch (tag) {
-        .add => try self.binOp(.add, inst, lhs, rhs, lhs_ty, rhs_ty),
-        .sub => try self.binOp(.sub, inst, lhs, rhs, lhs_ty, rhs_ty),
+    const result: MCValue = switch (tag) {
+        .add => try self.binOp(.add, metadata, lhs, rhs, lhs_ty, rhs_ty),
+        .sub => try self.binOp(.sub, metadata, lhs, rhs, lhs_ty, rhs_ty),
         else => unreachable,
     };
     return self.finishAir(inst, result, .{ bin_op.lhs, bin_op.rhs, .none });
@@ -1265,12 +1340,10 @@ fn airBinOp(self: *Self, inst: Air.Inst.Index, tag: Air.Inst.Tag) !void {
 fn airPtrArithmetic(self: *Self, inst: Air.Inst.Index, tag: Air.Inst.Tag) !void {
     const ty_pl = self.air.instructions.items(.data)[inst].ty_pl;
     const bin_op = self.air.extraData(Air.Bin, ty_pl.payload).data;
-    const lhs = try self.resolveInst(bin_op.lhs);
-    const rhs = try self.resolveInst(bin_op.rhs);
     const lhs_ty = self.typeOf(bin_op.lhs);
     const rhs_ty = self.typeOf(bin_op.rhs);
 
-    const result: MCValue = if (self.liveness.isUnused(inst)) .dead else try self.ptrArithmetic(tag, lhs, rhs, lhs_ty, rhs_ty, inst);
+    const result: MCValue = if (self.liveness.isUnused(inst)) .dead else try self.ptrArithmetic(tag, bin_op, lhs_ty, rhs_ty, inst);
     return self.finishAir(inst, result, .{ bin_op.lhs, bin_op.rhs, .none });
 }
 
@@ -1344,61 +1417,69 @@ fn airMulWithOverflow(self: *Self, inst: Air.Inst.Index) !void {
         const tuple_size = @as(u32, @intCast(tuple_ty.abiSize(mod)));
         const tuple_align = tuple_ty.abiAlignment(mod);
         const overflow_offset = @as(u32, @intCast(tuple_ty.structFieldOffset(1, mod)));
+        const lhs_bind: ReadArg.Bind = .{ .inst = extra.lhs };
+        const rhs_bind: ReadArg.Bind = .{ .inst = extra.rhs };
 
         switch (lhs_ty.zigTypeTag(mod)) {
             .Vector => return self.fail("TODO implement mul_with_overflow for vectors", .{}),
             .Int => {
                 assert(lhs_ty.eql(rhs_ty, mod));
                 const int_info = lhs_ty.intInfo(mod);
+
                 if (int_info.bits < 32) {
                     // Do the multiplication
-                    const mul_result = try self.binOp(.mul, null, lhs, rhs, lhs_ty, rhs_ty);
-                    const mul_reg = mul_result.register;
-                    const mul_reg_lock = self.register_manager.lockRegAssumeUnused(mul_reg);
-                    defer self.register_manager.unlockReg(mul_reg_lock);
+                    var lhs_reg: Register = undefined;
+                    var rhs_reg: Register = undefined;
+                    var mul_reg: Register = undefined;
+                    var overflow_reg: Register = undefined;
 
-                    const overflow_register = try self.register_manager.allocReg(null, gp);
-                    const overflow_lock = self.register_manager.lockRegAssumeUnused(overflow_register);
-                    defer self.register_manager.unlockReg(overflow_lock);
+                    const read_args = &[_]ReadArg{
+                        .{ .ty = lhs_ty, .bind = lhs_bind, .class = gp, .reg = &lhs_reg },
+                        .{ .ty = lhs_ty, .bind = rhs_bind, .class = gp, .reg = &rhs_reg },
+                    };
+                    const write_args = &[_]WriteArg{
+                        .{ .ty = lhs_ty, .bind = .none, .class = gp, .reg = &mul_reg },
+                        .{ .ty = lhs_ty, .bind = .none, .class = gp, .reg = &overflow_reg },
+                    };
+                    try self.allocRegs(read_args, write_args, null);
 
                     // Move overflow bits into overflow register
                     switch (int_info.signedness) {
                         .unsigned => _ = try self.addInst(.{ .srli = .{
-                            .rd = overflow_register,
-                            .rs1 = mul_result.register,
+                            .rd = overflow_reg,
+                            .rs1 = mul_reg,
                             .imm12 = @bitCast(@as(u12, @truncate(int_info.bits))),
                         } }),
                         .signed => {
                             _ = try self.addInst(.{ .slli = .{
-                                .rd = overflow_register,
-                                .rs1 = mul_result.register,
+                                .rd = overflow_reg,
+                                .rs1 = mul_reg,
                                 .imm12 = @bitCast(@as(u12, @truncate(64 - int_info.bits))),
                             } });
                             _ = try self.addInst(.{ .srli = .{
-                                .rd = overflow_register,
-                                .rs1 = overflow_register,
+                                .rd = overflow_reg,
+                                .rs1 = overflow_reg,
                                 .imm12 = @bitCast(@as(u12, @truncate(64 - int_info.bits))),
                             } });
                         },
                     }
                     // If any bits are set, there was overflow
                     _ = try self.addInst(.{ .snez = .{
-                        .rd = overflow_register,
-                        .rs1 = overflow_register,
+                        .rd = overflow_reg,
+                        .rs1 = overflow_reg,
                     } });
                     // Move result into proper place in the struct
                     _ = try self.addInst(.{ .slli = .{
-                        .rd = overflow_register,
-                        .rs1 = overflow_register,
+                        .rd = overflow_reg,
+                        .rs1 = overflow_reg,
                         .imm12 = @bitCast(@as(u12, @truncate(overflow_offset * 8))),
                     } });
                     // Combine both into a single register
                     _ = try self.addInst(.{ .@"or" = .{
                         .rd = mul_reg,
                         .rs1 = mul_reg,
-                        .rs2 = overflow_register,
+                        .rs2 = overflow_reg,
                     } });
-                    return self.fail("TODO implement mul_with_overflow for integers < u32/i32", .{});
                 } else if (int_info.bits == 32) {
                     // This implementation assumes the result can be returned through a single register
                     // of the form [overflow:result].
@@ -1406,109 +1487,108 @@ fn airMulWithOverflow(self: *Self, inst: Air.Inst.Index) !void {
                     assert(tuple_align == 4);
                     assert(overflow_offset == 4);
 
-                    // TODO: Can't reuse registers if lhs or rhs die after this instruction
-                    // TODO: Can reduce the amount of instructions if result is laid out as [result:overflow]
-                    const mul_and_overflow_register = switch (int_info.signedness) {
-                        .unsigned => dest: {
+                    var lhs_reg: Register = undefined;
+                    var rhs_reg: Register = undefined;
+                    var mul_reg: Register = undefined;
+                    var overflow_reg: Register = undefined;
+
+                    const read_args = &[_]ReadArg{
+                        .{ .ty = lhs_ty, .bind = lhs_bind, .class = gp, .reg = &lhs_reg },
+                        .{ .ty = lhs_ty, .bind = rhs_bind, .class = gp, .reg = &rhs_reg },
+                    };
+                    const write_args = &[_]WriteArg{
+                        .{ .ty = lhs_ty, .bind = .none, .class = gp, .reg = &mul_reg },
+                        .{ .ty = lhs_ty, .bind = .none, .class = gp, .reg = &overflow_reg },
+                    };
+                    try self.allocRegs(read_args, write_args, null);
+
+                    switch (int_info.signedness) {
+                        .unsigned => {
                             // Strategy here is to check that the upper 64 bits of the
                             // multiplication done with values shifted to the left by 32 has any
                             // bits in the upper 32 set.
-                            const shifted_lhs_register = try self.register_manager.allocReg(null, gp);
-                            const shifted_lhs_lock = self.register_manager.lockRegAssumeUnused(shifted_lhs_register);
-                            defer self.register_manager.unlockReg(shifted_lhs_lock);
-
-                            const shifted_rhs_register = try self.register_manager.allocReg(null, gp);
-                            const shifted_rhs_lock = self.register_manager.lockRegAssumeUnused(shifted_rhs_register);
-                            defer self.register_manager.unlockReg(shifted_rhs_lock);
 
                             // Set up lhs for upper multiplication
                             _ = try self.addInst(.{ .slli = .{
-                                .rd = shifted_lhs_register,
+                                .rd = mul_reg,
                                 .rs1 = lhs.register,
                                 .imm12 = 32,
                             } });
                             // Set up rhs for upper multiplication
                             _ = try self.addInst(.{ .slli = .{
-                                .rd = shifted_rhs_register,
+                                .rd = overflow_reg,
                                 .rs1 = rhs.register,
                                 .imm12 = 32,
                             } });
                             // Do the multiplication
                             _ = try self.addInst(.{ .mulhu = .{
-                                .rd = shifted_lhs_register,
-                                .rs1 = shifted_lhs_register,
-                                .rs2 = shifted_rhs_register,
+                                .rd = mul_reg,
+                                .rs1 = mul_reg,
+                                .rs2 = overflow_reg,
                             } });
                             // Put the upper 32 bits of the multiplication result into the overflow register
                             _ = try self.addInst(.{ .srli = .{
-                                .rd = shifted_rhs_register,
-                                .rs1 = shifted_lhs_register,
+                                .rd = overflow_reg,
+                                .rs1 = mul_reg,
                                 .imm12 = 32,
                             } });
                             // If any bits are set, there was overflow
                             _ = try self.addInst(.{ .snez = .{
-                                .rd = shifted_rhs_register,
-                                .rs1 = shifted_rhs_register,
+                                .rd = overflow_reg,
+                                .rs1 = overflow_reg,
                             } });
-                            break :dest .{ .mul = shifted_lhs_register, .overflow = shifted_rhs_register };
                         },
-                        .signed => dest: {
+                        .signed => {
                             // Strategy here is to check that sign-extended 32-bit multiply and
                             // lower 64 bits of 64-bit multiply produce the same result
-                            const mul_result = try self.binOp(.mul, null, lhs, rhs, lhs_ty, rhs_ty);
-                            const mul_register = mul_result.register;
-                            const mul_lock = self.register_manager.lockRegAssumeUnused(mul_register);
-                            defer self.register_manager.unlockReg(mul_lock);
-
-                            const mulw_result = try self.binOp(.mulw, null, lhs, rhs, lhs_ty, rhs_ty);
-                            const mulw_register = mulw_result.register;
-                            const mulw_lock = self.register_manager.lockRegAssumeUnused(mulw_register);
-                            defer self.register_manager.unlockReg(mulw_lock);
-
-                            const overflow_reg = try self.register_manager.allocReg(null, gp);
-                            const overflow_reg_lock = self.register_manager.lockRegAssumeUnused(overflow_reg);
-                            defer self.register_manager.unlockReg(overflow_reg_lock);
+                            _ = try self.addInst(.{ .mul = .{
+                                .rd = mul_reg,
+                                .rs1 = lhs_reg,
+                                .rs2 = rhs_reg,
+                            } });
+                            _ = try self.addInst(.{ .mulw = .{
+                                .rd = overflow_reg,
+                                .rs1 = lhs_reg,
+                                .rs2 = rhs_reg,
+                            } });
                             // Overflow register will be non-zero if the results differ
                             _ = try self.addInst(.{ .xor = .{
                                 .rd = overflow_reg,
-                                .rs1 = mul_register,
-                                .rs2 = mulw_register,
+                                .rs1 = mul_reg,
+                                .rs2 = overflow_reg,
                             } });
                             // If any bits are set, then there was overflow
                             _ = try self.addInst(.{ .snez = .{
                                 .rd = overflow_reg,
                                 .rs1 = overflow_reg,
                             } });
-                            break :dest .{ .mul = mul_register, .overflow = overflow_reg };
                         },
-                    };
+                    }
                     // Now we combine the two results into a single register
-                    const mul_register = mul_and_overflow_register.mul;
-                    const overflow_register = mul_and_overflow_register.overflow;
                     // Move overflow bit to upper 32 bits
                     _ = try self.addInst(.{ .slli = .{
-                        .rd = overflow_register,
-                        .rs1 = overflow_register,
+                        .rd = overflow_reg,
+                        .rs1 = overflow_reg,
                         .imm12 = 32,
                     } });
                     // Zero out upper 32 bits of multiply result
                     _ = try self.addInst(.{ .slli = .{
-                        .rd = mul_register,
-                        .rs1 = mul_register,
+                        .rd = mul_reg,
+                        .rs1 = mul_reg,
                         .imm12 = 32,
                     } });
                     _ = try self.addInst(.{ .srli = .{
-                        .rd = mul_register,
-                        .rs1 = mul_register,
+                        .rd = mul_reg,
+                        .rs1 = mul_reg,
                         .imm12 = 32,
                     } });
                     // Combine the results into one register
                     _ = try self.addInst(.{ .@"or" = .{
-                        .rd = mul_register,
-                        .rs1 = mul_register,
-                        .rs2 = overflow_register,
+                        .rd = mul_reg,
+                        .rs1 = mul_reg,
+                        .rs2 = overflow_reg,
                     } });
-                    break :result MCValue{ .register = mul_register };
+                    break :result MCValue{ .register = mul_reg };
                 } else if (int_info.bits <= 64) {
                     return self.fail("TODO implement mul_with_overflow for integers <= u64/i64", .{});
                 } else return self.fail("TODO implement mul_with_overflow for integers > u64/i64", .{});
@@ -2189,14 +2269,12 @@ fn airRetLoad(self: *Self, inst: Air.Inst.Index) !void {
 
 fn airCmp(self: *Self, inst: Air.Inst.Index, op: math.CompareOperator) !void {
     const bin_op = self.air.instructions.items(.data)[inst].bin_op;
-    const lhs = try self.resolveInst(bin_op.lhs);
-    const rhs = try self.resolveInst(bin_op.rhs);
     const lhs_ty = self.typeOf(bin_op.lhs);
 
     const result: MCValue = if (self.liveness.isUnused(inst))
         .dead
     else
-        try self.cmp(inst, lhs, rhs, lhs_ty, op);
+        try self.cmp(inst, .{ .inst = bin_op.lhs }, .{ .inst = bin_op.rhs }, lhs_ty, op);
 
     return self.finishAir(inst, result, .{ bin_op.lhs, bin_op.rhs, .none });
 }
@@ -2204,39 +2282,103 @@ fn airCmp(self: *Self, inst: Air.Inst.Index, op: math.CompareOperator) !void {
 fn cmp(
     self: *Self,
     maybe_inst: ?Air.Inst.Index,
-    lhs: MCValue,
-    rhs: MCValue,
+    lhs: ReadArg.Bind,
+    rhs: ReadArg.Bind,
     lhs_ty: Type,
     op: math.CompareOperator,
 ) !MCValue {
     const mod = self.bin_file.options.module.?;
     const int_ty = switch (lhs_ty.zigTypeTag(mod)) {
         .Int => lhs_ty,
-        else => return self.fail("TODO ARM non integer cmp", .{}),
+        else => return self.fail("TODO RISCV non integer cmp", .{}),
     };
 
     const int_info = int_ty.intInfo(mod);
     if (int_info.bits <= 64) {
-        return switch (op) {
-            .lt => switch (int_info.signedness) {
-                .signed => try self.binOp(.slt, maybe_inst, lhs, rhs, lhs_ty, lhs_ty),
-                .unsigned => try self.binOp(.sltu, maybe_inst, lhs, rhs, lhs_ty, lhs_ty),
-            },
-            .lte => switch (int_info.signedness) {
-                .signed => try self.binOp(.slte, maybe_inst, lhs, rhs, lhs_ty, lhs_ty),
-                .unsigned => try self.binOp(.slteu, maybe_inst, lhs, rhs, lhs_ty, lhs_ty),
-            },
-            .eq => try self.binOp(.seq, maybe_inst, lhs, rhs, lhs_ty, lhs_ty),
-            .gte => switch (int_info.signedness) {
-                .signed => try self.binOp(.sgte, maybe_inst, lhs, rhs, lhs_ty, lhs_ty),
-                .unsigned => try self.binOp(.sgteu, maybe_inst, lhs, rhs, lhs_ty, lhs_ty),
-            },
-            .gt => switch (int_info.signedness) {
-                .signed => try self.binOp(.sgt, maybe_inst, lhs, rhs, lhs_ty, lhs_ty),
-                .unsigned => try self.binOp(.sgtu, maybe_inst, lhs, rhs, lhs_ty, lhs_ty),
-            },
-            .neq => try self.binOp(.sneq, maybe_inst, lhs, rhs, lhs_ty, lhs_ty),
+        var dest_reg: Register = undefined;
+        var lhs_reg: Register = undefined;
+        var rhs_reg: Register = undefined;
+
+        const rhs_immediate = try rhs.resolveToImmediate(self);
+        const rhs_immediate_ok = if (rhs_immediate) |imm| @as(i64, @bitCast(imm)) <= std.math.maxInt(i12) else false;
+
+        const write_arg = [_]WriteArg{
+            .{ .ty = int_ty, .bind = .none, .class = gp, .reg = &dest_reg },
         };
+
+        const maybe_metadata = if (!rhs_immediate_ok and maybe_inst != null) ReuseMetadata{
+            .corresponding_inst = maybe_inst.?,
+            .operand_mapping = &.{ 0, 1 },
+        } else null;
+
+        if (rhs_immediate_ok) {
+            const read_args = [_]ReadArg{
+                .{ .ty = int_ty, .bind = lhs, .class = gp, .reg = &lhs_reg },
+            };
+            try self.allocRegs(&read_args, &write_arg, maybe_metadata);
+
+            const mir_data: Mir.Inst.IType = .{
+                .rd = dest_reg,
+                .rs1 = lhs_reg,
+                .imm12 = @bitCast(@as(u12, @truncate(rhs_immediate.?))),
+            };
+
+            _ = try switch (op) {
+                .lt => switch (int_info.signedness) {
+                    .signed => self.addInst(.{ .slti = mir_data }),
+                    .unsigned => self.addInst(.{ .sltui = mir_data }),
+                },
+                .lte => switch (int_info.signedness) {
+                    .signed => self.addInst(.{ .sltei = mir_data }),
+                    .unsigned => self.addInst(.{ .slteui = mir_data }),
+                },
+                .eq => self.addInst(.{ .seqi = mir_data }),
+                .gt => switch (int_info.signedness) {
+                    .signed => self.addInst(.{ .sgti = mir_data }),
+                    .unsigned => self.addInst(.{ .sgtui = mir_data }),
+                },
+                .gte => switch (int_info.signedness) {
+                    .signed => self.addInst(.{ .sgtei = mir_data }),
+                    .unsigned => self.addInst(.{ .sgteui = mir_data }),
+                },
+                .neq => self.addInst(.{ .sneqi = mir_data }),
+            };
+        } else {
+            const read_args = [_]ReadArg{
+                .{ .ty = int_ty, .bind = lhs, .class = gp, .reg = &lhs_reg },
+                .{ .ty = int_ty, .bind = rhs, .class = gp, .reg = &rhs_reg },
+            };
+            try self.allocRegs(&read_args, &write_arg, maybe_metadata);
+
+            const mir_data: Mir.Inst.RType = .{
+                .rd = dest_reg,
+                .rs1 = lhs_reg,
+                .rs2 = rhs_reg,
+            };
+
+            _ = try switch (op) {
+                .lt => switch (int_info.signedness) {
+                    .signed => self.addInst(.{ .slt = mir_data }),
+                    .unsigned => self.addInst(.{ .sltu = mir_data }),
+                },
+                .lte => switch (int_info.signedness) {
+                    .signed => self.addInst(.{ .slte = mir_data }),
+                    .unsigned => self.addInst(.{ .slteu = mir_data }),
+                },
+                .eq => self.addInst(.{ .seq = mir_data }),
+                .gt => switch (int_info.signedness) {
+                    .signed => self.addInst(.{ .sgt = mir_data }),
+                    .unsigned => self.addInst(.{ .sgtu = mir_data }),
+                },
+                .gte => switch (int_info.signedness) {
+                    .signed => self.addInst(.{ .sgte = mir_data }),
+                    .unsigned => self.addInst(.{ .sgteu = mir_data }),
+                },
+                .neq => self.addInst(.{ .sneq = mir_data }),
+            };
+        }
+
+        return MCValue{ .register = dest_reg };
     } else return self.fail("TODO riscv cmp for integer sizes > 64", .{});
 }
 
@@ -3028,11 +3170,12 @@ fn allocRegs(
     // corresponding operand index in the Air instruction
     assert(!(reuse_metadata != null and reuse_metadata.?.operand_mapping.len != read_args.len)); // see note above
 
-    // TODO: why var?
-    var locks = [_]?RegisterLock{null} ** 3; // Can have a maximum of 3 operands (dest, rs1, rs2/imm)
+    const locks = try self.gpa.alloc(?RegisterLock, read_args.len + write_args.len);
+    defer self.gpa.free(locks);
     var read_locks = locks[0..read_args.len];
     var write_locks = locks[read_args.len..(read_args.len + write_args.len)];
 
+    @memset(locks, null);
     defer for (locks) |lock| {
         if (lock) |locked_reg| self.register_manager.unlockReg(locked_reg);
     };
